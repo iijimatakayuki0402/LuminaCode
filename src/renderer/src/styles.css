@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+
+/* 要件定義書 10.3.1：アクセントカラー（薄紫／水色／薄い赤）× 表示モード（ダーク／ライト） */
+:root {
+  --bg: #f6f7f9;
+  --fg: #1b1f27;
+  --muted: #5b6472;
+  --accent: #2a9dd6;
+  --accent-bg: #e4f4fc;
+}
+:root[data-mode='dark'] {
+  --bg: #0e1116;
+  --fg: #e6e9ef;
+  --muted: #9aa3b2;
+}
+:root[data-accent='purple'] {
+  --accent: #8b6fd6;
+  --accent-bg: #efe9fb;
+}
+:root[data-accent='red'] {
+  --accent: #e0707a;
+  --accent-bg: #fce9eb;
+}
+:root[data-mode='dark'][data-accent='cyan'] {
+  --accent: #6ccbf2;
+  --accent-bg: #15303d;
+}
+:root[data-mode='dark'][data-accent='purple'] {
+  --accent: #b9a5f0;
+  --accent-bg: #2a2342;
+}
+:root[data-mode='dark'][data-accent='red'] {
+  --accent: #f39aa2;
+  --accent-bg: #3f2227;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Yu Gothic UI', 'Meiryo UI', system-ui, sans-serif;
+}
+.app {
+  padding: 2rem;
+}
+.app h1 {
+  color: var(--accent);
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+.muted {
+  color: var(--muted);
+}

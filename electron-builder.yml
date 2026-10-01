@@ -1,0 +1,17 @@
+appId: com.tiijima.lumina-code
+productName: Lumina Code
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
