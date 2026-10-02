@@ -1,0 +1,4 @@
+# 改行コードは LF に統一する（Prettier の既定と合わせる。core.autocrlf=true の環境でも CRLF に変換させない）
+* text=auto eol=lf
+*.exe binary
+*.node binary
