@@ -342,6 +342,51 @@ export interface CoworkPrefs {
 }
 
 // ========================================
+// 検索・書き出し・バックアップ（要件 6.9、6.11、10.2）
+// ========================================
+
+export interface SearchQuery {
+  text: string
+  projectId?: string
+  projectType?: ProjectType
+}
+
+export interface SearchHit {
+  /** message: 会話本文（SRC-01）/ attachment: 添付ファイル名（SRC-02） */
+  kind: 'message' | 'attachment'
+  message_id: string
+  thread_id: string
+  thread_title: string | null
+  project_id: string
+  project_name: string
+  project_type: ProjectType
+  role: MessageRole
+  created_at: number
+  /** 一致箇所を [ ] で囲んだ抜粋。添付ファイルの場合はファイル名 */
+  snippet: string
+}
+
+/** 読み込む前の確認（EXP-01） */
+export interface ImportPreview {
+  /** 読み込みを確定するときに指定する */
+  token: string
+  name: string
+  type: ProjectType
+  /** 書き出し元の作業フォルダ（Cowork。EXP-05: 読み込み時に再指定する） */
+  work_folder: string | null
+  threads: number
+  messages: number
+  attachments: number
+  exported_at: number
+}
+
+export interface BackupInfo {
+  path: string
+  created_at: number
+  size_bytes: number
+}
+
+// ========================================
 // 使用量（要件 USG-01〜05）
 // ========================================
 

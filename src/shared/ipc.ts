@@ -7,6 +7,10 @@ import type {
   AlwaysAllowRules,
   ApiErrorKind,
   ApiKeyStatus,
+  BackupInfo,
+  ImportPreview,
+  SearchHit,
+  SearchQuery,
   Appearance,
   ChatEvent,
   ChatPrefs,
@@ -49,6 +53,8 @@ export interface AppInfo {
   pricingPath: string
   /** アプリログ（6.14） */
   logPath: string
+  /** DB のバックアップ（10.2） */
+  backupPath: string
 }
 
 export interface IpcContract {
@@ -127,6 +133,21 @@ export interface IpcContract {
   'usage:getLimits': { args: []; result: UsageLimits }
   'usage:setLimits': { args: [input: Partial<UsageLimits>]; result: UsageLimits }
   'usage:setProjectLimit': { args: [projectId: string, limit: number | null]; result: void }
+
+  /** 横断検索（SRC-01、SRC-02） */
+  'search:query': { args: [query: SearchQuery]; result: SearchHit[] }
+
+  /** 書き出し（EXP-01、EXP-02）。保存先を選んで書き出す（キャンセル時は null） */
+  'export:project': { args: [projectId: string]; result: string | null }
+  'export:threadMarkdown': { args: [threadId: string]; result: string | null }
+  /** 読み込み（EXP-01）。ファイルを選んで内容を確認する（キャンセル時は null） */
+  'import:select': { args: []; result: ImportPreview | null }
+  /** 確認した内容で読み込む。Cowork は作業フォルダの指定が必須（EXP-05） */
+  'import:confirm': { args: [token: string, workFolder: string | null]; result: Project }
+
+  /** DB のバックアップ（10.2） */
+  'backup:now': { args: []; result: BackupInfo }
+  'backup:list': { args: []; result: BackupInfo[] }
 
   /** 操作ログ（LOG-02、LOG-03） */
   'logs:search': { args: [filter: ToolEventFilter]; result: ToolEventRow[] }
@@ -262,6 +283,17 @@ export interface LuminaApi {
     getLimits: Invoke<'usage:getLimits'>
     setLimits: Invoke<'usage:setLimits'>
     setProjectLimit: Invoke<'usage:setProjectLimit'>
+  }
+  search: {
+    query: Invoke<'search:query'>
+  }
+  data: {
+    exportProject: Invoke<'export:project'>
+    exportThreadMarkdown: Invoke<'export:threadMarkdown'>
+    importSelect: Invoke<'import:select'>
+    importConfirm: Invoke<'import:confirm'>
+    backupNow: Invoke<'backup:now'>
+    backupList: Invoke<'backup:list'>
   }
   logs: {
     search: Invoke<'logs:search'>

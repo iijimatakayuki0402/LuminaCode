@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -13,6 +13,7 @@ import { getGlobalInstructions } from './settings/instructions'
 import { CoworkService } from './cowork/coworkService'
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
+import { runDailyBackup } from './data/backup'
 import { UsageService } from './usage/usageService'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
 import { closeDatabase, DatabaseIntegrityError, getDatabase } from './db/init'
@@ -172,6 +173,12 @@ function setupBackend(): boolean {
     emit: emitToAll
   })
 
+  // 10.2: DB を日次でバックアップする（直近 7 世代）
+  const backupDir = join(app.getPath('userData'), 'backups')
+  void runDailyBackup(db, backupDir).catch((error) =>
+    console.warn('[startup] backup failed:', (error as Error).message)
+  )
+
   // LOG-03: 保持期間（90 日）を過ぎた操作ログを削除する
   try {
     deleteToolEventsBefore(db, Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000)
@@ -204,6 +211,21 @@ function setupBackend(): boolean {
         writeFileSync(result.filePath, content, 'utf-8')
         return result.filePath
       },
+      openTextFile: async (filters) => {
+        const owner = BrowserWindow.getFocusedWindow()
+        const options: Electron.OpenDialogOptions = { properties: ['openFile'], filters }
+        const result = owner
+          ? await dialog.showOpenDialog(owner, options)
+          : await dialog.showOpenDialog(options)
+        const path = result.canceled ? null : result.filePaths[0]
+        if (!path) return null
+        // 読み込むファイルの大きさを制限する（添付ファイルを含めて 500MB まで）
+        if (statSync(path).size > 500 * 1024 * 1024) {
+          throw new Error('ファイルが大きすぎます。')
+        }
+        return readFileSync(path, 'utf-8')
+      },
+      backupDir,
       selectFiles: async () => {
         const owner = BrowserWindow.getFocusedWindow()
         const options: Electron.OpenDialogOptions = { properties: ['openFile', 'multiSelections'] }
@@ -235,7 +257,8 @@ function setupBackend(): boolean {
         chrome: process.versions.chrome,
         dataPath: app.getPath('userData'),
         pricingPath: usage.pricingFile,
-        logPath: appLogPath
+        logPath: appLogPath,
+        backupPath: backupDir
       }
     }),
     (event) => isTrustedSenderUrl(event.senderFrame?.url, trustedOrigin)

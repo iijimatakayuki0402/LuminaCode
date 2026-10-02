@@ -40,6 +40,7 @@ let keyFile: string
 let usedKeys: string[]
 let selectedFolder: string | null = null
 let saved: { name: string; content: string } | null = null
+let importText: string | null = null
 
 const call = <T = unknown>(channel: IpcChannel, ...args: unknown[]): Promise<IpcResult<T>> =>
   invokeHandler(handlers, channel, true, args) as Promise<IpcResult<T>>
@@ -115,8 +116,11 @@ beforeEach(() => {
       chrome: 'c',
       dataPath: 'C:\\data',
       pricingPath: 'p',
-      logPath: 'l'
-    }
+      logPath: 'l',
+      backupPath: 'b'
+    },
+    openTextFile: async () => importText,
+    backupDir: join(dir, 'backups')
   })
 })
 
@@ -553,5 +557,60 @@ describe('Stage 7: 使用量', () => {
       projects: [],
       projectLimits: { [project.id]: 3 }
     })
+  })
+})
+
+describe('P2-2: 検索・書き出し・読み込み', () => {
+  it('プロジェクトを書き出して読み込むと、新しい ID で復元される', async () => {
+    const project = await value<Project>('projects:create', { type: 'chat', name: '書き出し元' })
+    const thread = await value<Thread>('threads:create', { project_id: project.id, title: 'T' })
+    db.prepare(
+      `INSERT INTO messages (id, thread_id, role, content, created_at) VALUES ('m1', ?, 'user', '紅葉の名所', 1)`
+    ).run(thread.id)
+
+    expect(await value('export:project', project.id)).toContain('.lumina.json')
+    expect(saved!.name).toBe('書き出し元.lumina.json')
+    importText = saved!.content
+
+    const preview = await value<{ token: string; name: string; messages: number }>('import:select')
+    expect(preview).toMatchObject({ name: '書き出し元', messages: 1 })
+    const imported = await value<Project>('import:confirm', preview.token, null)
+    expect(imported.id).not.toBe(project.id)
+    const threads = await value<Thread[]>('threads:listByProject', imported.id)
+    expect(threads.map((t) => t.title)).toEqual(['T'])
+    const hits = await value<{ project_id: string }[]>('search:query', { text: '紅葉の' })
+    expect(hits.map((h) => h.project_id).sort()).toEqual([project.id, imported.id].sort())
+    // 同じ確認内容では 2 回読み込めない
+    expect(await call('import:confirm', preview.token, null)).toMatchObject({
+      error: { code: 'validation' }
+    })
+  })
+
+  it('壊れたファイルは読み込まない', async () => {
+    importText = '{"format":"other"}'
+    expect(await call('import:select')).toMatchObject({ error: { code: 'validation' } })
+    importText = null
+    expect(await value('import:select')).toBeNull()
+  })
+
+  it('スレッドを Markdown で書き出す（EXP-02）', async () => {
+    const project = await value<Project>('projects:create', { type: 'chat', name: 'P' })
+    const thread = await value<Thread>('threads:create', {
+      project_id: project.id,
+      title: '議事録'
+    })
+    db.prepare(
+      `INSERT INTO messages (id, thread_id, role, content, created_at) VALUES ('q', ?, 'user', '質問です', 1)`
+    ).run(thread.id)
+    await value('export:threadMarkdown', thread.id)
+    expect(saved!.name).toBe('議事録.md')
+    expect(saved!.content).toContain('# 議事録')
+    expect(saved!.content).toContain('## USER')
+    expect(saved!.content).toContain('質問です')
+  })
+
+  it('今すぐバックアップでき、一覧に出る（10.2）', async () => {
+    const info = await value<{ path: string }>('backup:now')
+    expect(await value<{ path: string }[]>('backup:list')).toMatchObject([{ path: info.path }])
   })
 })

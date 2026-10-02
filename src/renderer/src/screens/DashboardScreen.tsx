@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Project, ProjectType } from '@shared/types'
+import type { ImportPreview, Project, ProjectType } from '@shared/types'
 import { ConfirmDialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
+import { ImportDialog } from '../components/ImportDialog'
 import { ProjectDialog, type ProjectDialogMode } from '../components/ProjectDialog'
 import { TypeBadge } from '../components/TypeBadge'
 import { unwrap } from '../lib/ipc'
@@ -32,6 +33,27 @@ export function DashboardScreen({
   const [dialog, setDialog] = useState<ProjectDialogMode | null>(null)
   const [deleting, setDeleting] = useState<Project | null>(null)
   const [message, setMessage] = useState<MessageState | null>(null)
+  const [importing, setImporting] = useState<ImportPreview | null>(null)
+
+  // EXP-01: 読み込むファイルを選び、内容を確認してから読み込む
+  const startImport = async (): Promise<void> => {
+    setMessage(null)
+    try {
+      const preview = await unwrap(window.lumina.data.importSelect())
+      if (preview) setImporting(preview)
+    } catch (e) {
+      setMessage({ tone: 'error', text: (e as Error).message })
+    }
+  }
+
+  const exportProject = async (project: Project): Promise<void> => {
+    try {
+      const path = await unwrap(window.lumina.data.exportProject(project.id))
+      if (path) setMessage({ tone: 'info', text: ja.exchange.exported(path) })
+    } catch (e) {
+      setMessage({ tone: 'error', text: (e as Error).message })
+    }
+  }
 
   const fetchProjects = useCallback(
     () => unwrap(window.lumina.projects.list({ includeArchived: showArchived })),
@@ -100,6 +122,9 @@ export function DashboardScreen({
           onClick={() => setDialog({ kind: 'create' })}
         >
           + {ja.dashboard.create}
+        </button>
+        <button className="btn" type="button" onClick={() => void startImport()}>
+          {ja.exchange.importProject}
         </button>
         <input
           className="input"
@@ -183,6 +208,9 @@ export function DashboardScreen({
                 >
                   {ja.dashboard.duplicate}
                 </button>
+                <button className="btn btn-sm" type="button" onClick={() => void exportProject(p)}>
+                  {ja.exchange.exportProject}
+                </button>
                 <button
                   className="btn btn-sm"
                   type="button"
@@ -224,6 +252,18 @@ export function DashboardScreen({
           onCancel={() => setDialog(null)}
           onDone={() => {
             setDialog(null)
+            void reload()
+          }}
+        />
+      )}
+
+      {importing && (
+        <ImportDialog
+          preview={importing}
+          onCancel={() => setImporting(null)}
+          onDone={(project) => {
+            setImporting(null)
+            setMessage({ tone: 'info', text: ja.exchange.imported(project.name) })
             void reload()
           }}
         />

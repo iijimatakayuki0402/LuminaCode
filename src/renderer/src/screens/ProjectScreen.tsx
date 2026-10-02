@@ -28,9 +28,12 @@ const PERMISSION_MODES: PermissionMode[] = ['confirm_each', 'auto_edit', 'plan_o
 
 export function ProjectScreen({
   project: initialProject,
+  focus,
   onBack
 }: {
   project: Project
+  /** 検索結果から開いたときの移動先（SRC-01） */
+  focus?: { threadId: string; messageId: string }
   onBack: () => void
 }): React.JSX.Element {
   const [project, setProject] = useState(initialProject)
@@ -54,20 +57,21 @@ export function ProjectScreen({
     [project.id]
   )
 
-  // THR-05: 最後に開いたスレッドを表示する（無ければ最新のスレッド）
+  // THR-05: 最後に開いたスレッドを表示する（無ければ最新のスレッド）。検索結果から開いた場合はそのスレッド
+  const focusThreadId = focus?.threadId
   useEffect(() => {
     let active = true
     Promise.all([fetchThreads(), unwrap(window.lumina.threads.getLastOpened(project.id))])
       .then(([list, last]) => {
         if (!active) return
         setThreads(list)
-        setSelectedId(last?.id ?? list[0]?.id ?? null)
+        setSelectedId(focusThreadId ?? last?.id ?? list[0]?.id ?? null)
       })
       .catch((e: unknown) => active && fail(e))
     return () => {
       active = false
     }
-  }, [fetchThreads, project.id])
+  }, [fetchThreads, project.id, focusThreadId])
 
   // 選択したスレッドを「最後に開いた」として記録する
   useEffect(() => {
@@ -361,6 +365,22 @@ export function ProjectScreen({
                     ))}
                   </select>
                 </div>
+                {/* EXP-02: スレッドを Markdown で書き出す */}
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  style={{ marginBottom: '0.5rem' }}
+                  onClick={() =>
+                    void unwrap(window.lumina.data.exportThreadMarkdown(selected.id))
+                      .then(
+                        (path) =>
+                          path && setMessage({ tone: 'info', text: ja.exchange.exported(path) })
+                      )
+                      .catch(fail)
+                  }
+                >
+                  {ja.exchange.exportMarkdown}
+                </button>
                 {/* CHT-07: 思考量（モデルが対応している段階だけを選べる） */}
                 {effortLevels.length > 0 && (
                   <div className="field">
@@ -386,6 +406,7 @@ export function ProjectScreen({
               </div>
               <ChatView
                 threadId={selected.id}
+                focusMessageId={focus?.threadId === selected.id ? focus.messageId : undefined}
                 cowork={project.type === 'cowork'}
                 onThreadChanged={() => void reload()}
                 onCompacted={(next) => {

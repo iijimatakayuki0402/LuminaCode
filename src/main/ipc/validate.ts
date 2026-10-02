@@ -17,6 +17,7 @@ import type {
   PermissionMode,
   ProjectType,
   PermissionResponse,
+  SearchQuery,
   SendMessageInput,
   ToolCategory,
   ToolEventFilter,
@@ -184,6 +185,12 @@ export const limit: Check<number | null> = (value, name) =>
 export const usageLimitsInput = object<Partial<UsageLimits>>({
   monthlyLimit: optional(limit),
   action: optional(oneOf(['stop', 'warn'] as const))
+})
+
+export const searchQuery = object<SearchQuery>({
+  text: str,
+  projectId: optional(id),
+  projectType: optional(oneOf<ProjectType>(['chat', 'cowork']))
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

@@ -274,6 +274,28 @@ export const MIGRATIONS: Migration[] = [
       'ALTER TABLE threads ADD COLUMN context_summary TEXT',
       "ALTER TABLE threads ADD COLUMN title_source TEXT NOT NULL DEFAULT 'manual'"
     ]
+  },
+  {
+    // 横断検索（SRC-01: 10 万メッセージで 2 秒以内。SQLite の全文検索を使う）
+    // 日本語は単語の区切りに依存しないよう trigram で索引を作る（3 文字以上の部分一致）
+    version: 6,
+    statements: [
+      `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+         content, content = 'messages', content_rowid = 'rowid', tokenize = 'trigram'
+       )`,
+      `CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+         INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+       END`,
+      `CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+         INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+       END`,
+      `CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+         INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+         INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+       END`,
+      "INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')",
+      'CREATE INDEX IF NOT EXISTS idx_attachments_filename ON attachments(filename)'
+    ]
   }
 ]
 

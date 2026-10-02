@@ -190,6 +190,31 @@ export class AttachmentStore {
     })
   }
 
+  /**
+   * 読み込んだ添付ファイルを保存する（EXP-01）
+   * 形式はファイル名から判定し直す（書き出しファイルの MIME タイプは信用しない）
+   */
+  writeFor(
+    messageId: string,
+    filename: string,
+    _declaredMime: string,
+    bytes: Buffer
+  ): Omit<AttachmentRecord, 'created_at'> {
+    const { kind, mime_type } = classifyFile(filename)
+    checkContent(filename, kind, bytes)
+    const id = randomUUID()
+    mkdirSync(join(this.dir, messageId), { recursive: true })
+    writeFileSync(join(this.dir, messageId, id), bytes)
+    return {
+      id,
+      message_id: messageId,
+      filename,
+      stored_path: join(messageId, id),
+      mime_type,
+      size_bytes: bytes.length
+    }
+  }
+
   /** 既存の添付ファイルを別のメッセージへ複製する（CHT-14 の編集・再送信） */
   copyTo(messageId: string, source: AttachmentRecord): Omit<AttachmentRecord, 'created_at'> {
     const id = randomUUID()

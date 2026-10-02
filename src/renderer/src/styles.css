@@ -1002,3 +1002,44 @@ dialog.dialog.danger .dialog-head {
 .thread-settings .field {
   margin-bottom: 0.5rem;
 }
+
+/* 検索（SRC-01） */
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.search-hit {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  font: inherit;
+  cursor: pointer;
+}
+.search-hit:hover {
+  border-color: var(--accent);
+}
+.search-snippet {
+  font-size: 0.9rem;
+}
+mark {
+  background: var(--accent-bg);
+  color: var(--fg);
+  outline: 1px solid var(--accent);
+  border-radius: 2px;
+}
+.log-row.highlighted {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}

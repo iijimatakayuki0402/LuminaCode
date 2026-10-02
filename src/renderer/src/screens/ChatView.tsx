@@ -52,9 +52,12 @@ export function ChatView({
   threadId,
   cowork = false,
   onThreadChanged,
-  onCompacted
+  onCompacted,
+  focusMessageId
 }: {
   threadId: string
+  /** 検索結果から開いたときに表示・強調するメッセージ（SRC-01） */
+  focusMessageId?: string
   /** Cowork のスレッド（ツール実行・確認ダイアログ・変更の取り消しを表示する） */
   cowork?: boolean
   /** タイトルの自動設定などでスレッド一覧の再読み込みが必要になったとき */
@@ -177,6 +180,32 @@ export function ChatView({
   }, [threadId, cowork])
 
   const path = useMemo(() => activePath(messages, leafId), [messages, leafId])
+
+  // SRC-01: 検索結果のメッセージを含む分岐を表示し、その位置までスクロールして強調する
+  const [highlight, setHighlight] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusMessageId) return
+    let active = true
+    unwrap(window.lumina.threads.setActiveLeaf(threadId, focusMessageId))
+      .then((thread) => {
+        if (!active) return
+        setLeafId(thread.active_leaf_id)
+        setHighlight(focusMessageId)
+        stickToBottom.current = false
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [threadId, focusMessageId])
+  useEffect(() => {
+    if (!highlight) return
+    document
+      .querySelector(`[data-message-id="${CSS.escape(highlight)}"]`)
+      ?.scrollIntoView({ block: 'center' })
+    const timer = setTimeout(() => setHighlight(null), 3000)
+    return () => clearTimeout(timer)
+  }, [highlight, path])
   const generating = path.some((m) => m.status === 'streaming')
   const latestUserId = [...path].reverse().find((m) => m.role === 'user')?.id ?? null
   const last = path.at(-1)
@@ -361,6 +390,7 @@ export function ChatView({
             <UserRow
               key={m.id}
               message={m}
+              highlighted={m.id === highlight}
               // CHT-06: 通常チャットはどのメッセージも編集できる。Cowork は最新の指示のみ（CHT-14）
               editable={!generating && (!cowork || m.id === latestUserId)}
               branch={branchNav(m)}
@@ -372,6 +402,7 @@ export function ChatView({
             <AssistantRow
               key={m.id}
               message={m}
+              highlighted={m.id === highlight}
               live={live[m.id]}
               cowork={cowork}
               tools={cowork ? tools.filter((t) => t.message_id === m.id) : []}
@@ -519,6 +550,7 @@ export function ChatView({
 
 function UserRow({
   message,
+  highlighted,
   editable,
   allowAttachments,
   branch,
@@ -526,6 +558,7 @@ function UserRow({
   onError
 }: {
   message: Message
+  highlighted: boolean
   editable: boolean
   allowAttachments: boolean
   /** 分岐の切り替え（CHT-06） */
@@ -557,7 +590,10 @@ function UserRow({
   }
 
   return (
-    <article className="log-row log-user">
+    <article
+      className={`log-row log-user${highlighted ? ' highlighted' : ''}`}
+      data-message-id={message.id}
+    >
       <header className="log-head">
         <span className="log-role">{ja.chat.user}</span>
         <time>{formatTime(message.created_at)}</time>
@@ -614,6 +650,7 @@ function UserRow({
 
 function AssistantRow({
   message,
+  highlighted,
   live,
   cowork,
   tools,
@@ -621,6 +658,7 @@ function AssistantRow({
   branch
 }: {
   message: Message
+  highlighted: boolean
   live?: Live
   cowork: boolean
   tools: ToolEventInfo[]
@@ -632,7 +670,11 @@ function AssistantRow({
   const thinking = streaming ? (live?.thinking ?? '') : (message.thinking ?? '')
 
   return (
-    <article className="log-row log-assistant" aria-busy={streaming}>
+    <article
+      className={`log-row log-assistant${highlighted ? ' highlighted' : ''}`}
+      data-message-id={message.id}
+      aria-busy={streaming}
+    >
       <header className="log-head">
         <span className="log-role">{ja.chat.assistant}</span>
         <time>{formatTime(message.created_at)}</time>

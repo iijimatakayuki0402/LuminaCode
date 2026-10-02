@@ -356,6 +356,41 @@ export const ja = {
     label: 'すべてのプロジェクトに適用する指示（プロジェクトのカスタム指示より先に適用します）',
     saved: '保存しました。'
   },
+  search: {
+    nav: '検索',
+    title: 'SEARCH',
+    placeholder: '会話の本文・添付ファイル名を検索（3 文字以上で全文検索）',
+    allProjects: 'すべてのプロジェクト',
+    allTypes: 'すべての種別',
+    run: '検索',
+    none: '一致するものはありません。',
+    limit: (n: number) => `新しい順に ${n} 件まで表示しています。`,
+    attachment: '添付ファイル',
+    open: '開く'
+  },
+  exchange: {
+    exportProject: '書き出し',
+    exported: (path: string) => `書き出しました: ${path}`,
+    exportMarkdown: 'Markdown で書き出す',
+    importProject: '読み込み',
+    importTitle: 'プロジェクトの読み込み',
+    importSummary: (threads: number, messages: number, files: number) =>
+      `スレッド ${threads} 件・メッセージ ${messages} 件・添付ファイル ${files} 件`,
+    exportedAt: (date: string) => `書き出し日時: ${date}`,
+    originalFolder: (path: string) => `書き出し元の作業フォルダ: ${path}`,
+    chooseFolder:
+      'このパソコンでの作業フォルダを指定してください（作業フォルダ内のファイルは書き出しに含まれていません）。',
+    confirm: '読み込む',
+    imported: (name: string) => `「${name}」を読み込みました。`
+  },
+  backup: {
+    section: 'バックアップ',
+    note: 'データベースを 1 日 1 回自動でバックアップし、直近 7 世代を保持します。',
+    now: '今すぐバックアップ',
+    done: (path: string) => `バックアップしました: ${path}`,
+    folder: (path: string) => `保存先: ${path}`,
+    none: 'まだバックアップはありません。'
+  },
   appearance: {
     section: '表示',
     mode: '表示モード',

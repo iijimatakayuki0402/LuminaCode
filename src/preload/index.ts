@@ -103,6 +103,17 @@ const api: LuminaApi = {
     setLimits: invoke('usage:setLimits'),
     setProjectLimit: invoke('usage:setProjectLimit')
   },
+  search: {
+    query: invoke('search:query')
+  },
+  data: {
+    exportProject: invoke('export:project'),
+    exportThreadMarkdown: invoke('export:threadMarkdown'),
+    importSelect: invoke('import:select'),
+    importConfirm: invoke('import:confirm'),
+    backupNow: invoke('backup:now'),
+    backupList: invoke('backup:list')
+  },
   logs: {
     search: invoke('logs:search'),
     export: invoke('logs:export'),

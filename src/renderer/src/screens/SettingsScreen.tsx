@@ -1,7 +1,14 @@
 import { useEffect, useId, useState } from 'react'
 import { ACCENTS, MODES } from '@shared/theme'
 import type { AppInfo } from '@shared/ipc'
-import type { ApiKeyStatus, Appearance, ChatPrefs, ModelList, UsageLimits } from '@shared/types'
+import type {
+  ApiKeyStatus,
+  Appearance,
+  BackupInfo,
+  ChatPrefs,
+  ModelList,
+  UsageLimits
+} from '@shared/types'
 import { ApiKeyForm } from '../components/ApiKeyForm'
 import { Message, type MessageState } from '../components/Message'
 import { unwrap } from '../lib/ipc'
@@ -32,6 +39,7 @@ export function SettingsScreen({
       <CoworkPrefsSection />
       <UsageLimitsSection />
       <DataSection />
+      <BackupSection />
     </main>
   )
 }
@@ -388,6 +396,57 @@ function DataSection(): React.JSX.Element {
           <br />v{info.version} / Electron {info.electron}
         </p>
       )}
+    </section>
+  )
+}
+
+/**
+ * バックアップ（10.2: 日次・7 世代。手動でも取れる）
+ */
+function BackupSection(): React.JSX.Element {
+  const [list, setList] = useState<BackupInfo[]>([])
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.data.backupList())
+      .then((l) => active && setList(l))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const backup = async (): Promise<void> => {
+    try {
+      const info = await unwrap(window.lumina.data.backupNow())
+      setMessage({ tone: 'info', text: ja.backup.done(info.path) })
+      setList(await unwrap(window.lumina.data.backupList()))
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="settings-backup">
+      <h2 id="settings-backup">{ja.backup.section}</h2>
+      <p className="hint">{ja.backup.note}</p>
+      {list.length === 0 ? (
+        <p className="hint">{ja.backup.none}</p>
+      ) : (
+        <ul className="month-list mono">
+          {list.map((b) => (
+            <li key={b.path} className="row" style={{ justifyContent: 'space-between' }}>
+              <span>{new Date(b.created_at).toLocaleString('ja-JP')}</span>
+              <span className="hint">{Math.ceil(b.size_bytes / 1024).toLocaleString()} KB</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button className="btn" type="button" onClick={() => void backup()}>
+        {ja.backup.now}
+      </button>
+      <Message message={message} />
     </section>
   )
 }

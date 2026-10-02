@@ -7,6 +7,7 @@ import { ja } from './locales/ja'
 import { DashboardScreen } from './screens/DashboardScreen'
 import { OperationLogScreen } from './screens/OperationLogScreen'
 import { UsageScreen } from './screens/UsageScreen'
+import { SearchScreen } from './screens/SearchScreen'
 import { ProjectScreen } from './screens/ProjectScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupScreen } from './screens/SetupScreen'
@@ -17,7 +18,8 @@ type Screen =
   | { name: 'settings' }
   | { name: 'logs' }
   | { name: 'usage' }
-  | { name: 'project'; project: Project }
+  | { name: 'project'; project: Project; focus?: { threadId: string; messageId: string } }
+  | { name: 'search' }
 
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<ApiKeyStatus | null>(null)
@@ -85,6 +87,11 @@ export default function App(): React.JSX.Element {
               {ja.nav.dashboard}
             </button>
           )}
+          {screen.name !== 'search' && (
+            <button className="btn" type="button" onClick={() => setScreen({ name: 'search' })}>
+              {ja.search.nav}
+            </button>
+          )}
           {screen.name !== 'usage' && (
             <button className="btn" type="button" onClick={() => setScreen({ name: 'usage' })}>
               {ja.usage.nav}
@@ -112,6 +119,24 @@ export default function App(): React.JSX.Element {
       )}
       {screen.name === 'logs' && <OperationLogScreen />}
       {screen.name === 'usage' && <UsageScreen />}
+      {screen.name === 'search' && (
+        <SearchScreen
+          onOpen={(hit) => {
+            // KEY-01: API キーが未設定の間はチャット・Cowork の画面を開かない
+            if (!status.configured) {
+              setScreen({ name: 'settings' })
+              return
+            }
+            void unwrap(window.lumina.projects.get(hit.project_id)).then((project) =>
+              setScreen({
+                name: 'project',
+                project,
+                focus: { threadId: hit.thread_id, messageId: hit.message_id }
+              })
+            )
+          }}
+        />
+      )}
       {screen.name === 'dashboard' && (
         <DashboardScreen
           apiKeyConfigured={status.configured}
@@ -120,7 +145,12 @@ export default function App(): React.JSX.Element {
         />
       )}
       {screen.name === 'project' && (
-        <ProjectScreen project={screen.project} onBack={() => setScreen({ name: 'dashboard' })} />
+        <ProjectScreen
+          key={`${screen.project.id}-${screen.focus?.messageId ?? ''}`}
+          project={screen.project}
+          focus={screen.focus}
+          onBack={() => setScreen({ name: 'dashboard' })}
+        />
       )}
     </>
   )

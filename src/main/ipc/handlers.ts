@@ -19,6 +19,17 @@ import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
 import type { CoworkService } from '../cowork/coworkService'
 import type { UsageService } from '../usage/usageService'
+import { search } from '../search/searchService'
+import { backupNow, listBackups } from '../data/backup'
+import {
+  exportProject,
+  importBundle,
+  parseBundle,
+  previewBundle,
+  threadToMarkdown,
+  type ProjectBundle
+} from '../data/projectBundle'
+import { randomUUID } from 'node:crypto'
 import { listTrash, purgeTrash, restoreFromTrash } from '../cowork/trash'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
 import type { AttachmentInfo, StageResult } from '@shared/types'
@@ -46,6 +57,10 @@ export interface HandlerDeps {
   attachments: AttachmentStore
   /** 保存ダイアログで保存先を選び、内容を書き込む（キャンセル時は null） */
   saveFile: (defaultName: string, content: string) => Promise<string | null>
+  /** 読み込むファイルを選び、内容を返す（キャンセル時は null） */
+  openTextFile: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>
+  /** DB のバックアップ先（10.2） */
+  backupDir: string
 }
 
 /** 複数ファイルを仮置きし、失敗したものは理由をまとめて返す */
@@ -88,8 +103,15 @@ export function createHandlers({
   coworkService,
   usage,
   attachments,
-  saveFile
+  saveFile,
+  openTextFile,
+  backupDir
 }: HandlerDeps): IpcHandlers {
+  // 読み込み前に確認した内容（確定するまで main で保持する）
+  const pendingImports = new Map<string, ProjectBundle>()
+  const safeName = (name: string): string =>
+    name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || 'export'
+
   // 通常チャットと Cowork の振り分け（スレッドが属するプロジェクトの種別で決める）
   const engineForThread = (threadId: string): ChatService | CoworkService => {
     const thread = found(ops.getThread(db, threadId), THREAD_NOT_FOUND)
@@ -267,6 +289,43 @@ export function createHandlers({
       found(ops.getProject(db, id), PROJECT_NOT_FOUND)
       usage.setProjectLimit(id, v.limit(value, 'limit'))
     },
+
+    'search:query': (query) => search(db, v.searchQuery(query, 'query')),
+
+    'export:project': async (projectId) => {
+      const id = v.id(projectId, 'projectId')
+      const bundle = exportProject(db, attachments, id)
+      return saveFile(`${safeName(bundle.project.name)}.lumina.json`, JSON.stringify(bundle))
+    },
+    'export:threadMarkdown': async (threadId) => {
+      const id = v.id(threadId, 'threadId')
+      const thread = found(ops.getThread(db, id), THREAD_NOT_FOUND)
+      return saveFile(`${safeName(thread.title ?? 'thread')}.md`, threadToMarkdown(db, id))
+    },
+    'import:select': async () => {
+      const text = await openTextFile([{ name: 'Lumina Code の書き出し', extensions: ['json'] }])
+      if (text === null) return null
+      const bundle = parseBundle(text)
+      const token = randomUUID()
+      pendingImports.clear()
+      pendingImports.set(token, bundle)
+      return previewBundle(bundle, token)
+    },
+    'import:confirm': (token, workFolder) => {
+      const bundle = pendingImports.get(v.id(token, 'token'))
+      if (!bundle) throw new ops.ValidationError('読み込むファイルをもう一度選んでください。')
+      const folder = v.optional(v.str)(workFolder ?? undefined, 'workFolder')
+      // EXP-05: Cowork は作業フォルダを再指定する（PRJ-05 の検証を通す）
+      const checked =
+        bundle.project.type === 'cowork' && folder
+          ? validateWorkFolder(folder, workFolderPolicy)
+          : null
+      const project = importBundle(db, attachments, bundle, checked)
+      pendingImports.delete(token as string)
+      return project
+    },
+    'backup:now': () => backupNow(db, backupDir),
+    'backup:list': () => listBackups(backupDir),
 
     'logs:search': (filter) => searchToolEvents(db, v.toolEventFilter(filter, 'filter')),
     'logs:export': (filter, format) => {
