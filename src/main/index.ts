@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
@@ -12,7 +13,9 @@ import { isTrustedSenderUrl, type TrustedOrigin } from './security/ipcSender'
 
 // 要件 5.3: データ保存先を %APPDATA%\LuminaCode\ に固定する（既定はパッケージ名で決まるため明示する）
 // userData を参照する処理（DB 等）より前、ready 前に設定する必要がある
-app.setPath('userData', join(app.getPath('appData'), 'LuminaCode'))
+// 開発時のみ、検証用に LUMINA_USER_DATA_DIR で切り替えられる（本来のデータを汚さないため）
+const devUserData = app.isPackaged ? undefined : process.env['LUMINA_USER_DATA_DIR']
+app.setPath('userData', devUserData ?? join(app.getPath('appData'), 'LuminaCode'))
 
 const rendererIndex = join(__dirname, '../renderer/index.html')
 const trustedOrigin: TrustedOrigin = {
@@ -92,6 +95,22 @@ function setupBackend(): boolean {
       apiKeyStore,
       modelService,
       createClient: createAnthropicClient,
+      workFolderPolicy: {
+        userDataPath: app.getPath('userData'),
+        homeDir: homedir(),
+        systemRoot: process.env['SystemRoot'] ?? 'C:\\Windows'
+      },
+      selectFolder: async (defaultPath) => {
+        const owner = BrowserWindow.getFocusedWindow()
+        const options: Electron.OpenDialogOptions = {
+          properties: ['openDirectory'],
+          defaultPath
+        }
+        const result = owner
+          ? await dialog.showOpenDialog(owner, options)
+          : await dialog.showOpenDialog(options)
+        return result.canceled ? null : (result.filePaths[0] ?? null)
+      },
       appInfo: {
         version: app.getVersion(),
         electron: process.versions.electron,

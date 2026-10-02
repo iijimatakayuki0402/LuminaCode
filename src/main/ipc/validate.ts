@@ -4,8 +4,11 @@
  * 想定外のキーは拒否する（意図しない列の更新を防ぐ）。
  */
 
+import { ACCENTS, MODES } from '@shared/theme'
 import type {
+  Appearance,
   CreateProjectInput,
+  ListProjectsOptions,
   CreateThreadInput,
   PermissionMode,
   ProjectType,
@@ -88,6 +91,15 @@ export const createThreadInput = object<CreateThreadInput>({
   title: optional(str),
   model: optional(str),
   extended_thinking: optional(bool)
+})
+
+export const listProjectsOptions = object<ListProjectsOptions>({
+  includeArchived: optional(bool)
+})
+
+export const appearanceInput = object<Partial<Appearance>>({
+  mode: optional(oneOf(MODES)),
+  accent: optional(oneOf(ACCENTS))
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

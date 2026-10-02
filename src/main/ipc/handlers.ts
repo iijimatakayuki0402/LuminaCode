@@ -10,6 +10,8 @@ import { testApiKey } from '../api/connection'
 import * as ops from '../db/operations'
 import type { ModelService } from '../models/modelService'
 import { normalizeApiKey, type ApiKeyStore } from '../secrets/apiKeyStore'
+import { validateWorkFolder, type WorkFolderPolicy } from '../security/workFolder'
+import { getAppearance, setAppearance } from '../settings/appearance'
 import { NotFoundError } from './errors'
 import * as v from './validate'
 
@@ -23,6 +25,9 @@ export interface HandlerDeps {
   apiKeyStore: ApiKeyStore
   modelService: ModelService
   createClient: ClientFactory
+  workFolderPolicy: WorkFolderPolicy
+  /** フォルダ選択ダイアログを表示する（Electron 依存のため外から渡す） */
+  selectFolder: (defaultPath?: string) => Promise<string | null>
 }
 
 function found<T>(value: T | null, message: string): T {
@@ -43,18 +48,32 @@ export function createHandlers({
   appInfo,
   apiKeyStore,
   modelService,
-  createClient
+  createClient,
+  workFolderPolicy,
+  selectFolder
 }: HandlerDeps): IpcHandlers {
+  // 作業フォルダは要件 PRJ-05 の検証を通し、実体パスで保存する
+  const checkWorkFolder = <T extends { work_folder?: string }>(input: T): T =>
+    input.work_folder
+      ? { ...input, work_folder: validateWorkFolder(input.work_folder, workFolderPolicy) }
+      : input
+
   return {
     'app:getInfo': () => appInfo,
 
-    'projects:list': () => ops.listProjects(db),
+    'projects:list': (options) =>
+      ops.listProjects(db, v.optional(v.listProjectsOptions)(options, 'options')),
     'projects:get': (projectId) =>
       found(ops.getProject(db, v.id(projectId, 'id')), PROJECT_NOT_FOUND),
-    'projects:create': (input) => ops.createProject(db, v.createProjectInput(input, 'input')),
+    'projects:create': (input) =>
+      ops.createProject(db, checkWorkFolder(v.createProjectInput(input, 'input'))),
     'projects:update': (projectId, input) =>
       found(
-        ops.updateProject(db, v.id(projectId, 'id'), v.updateProjectInput(input, 'input')),
+        ops.updateProject(
+          db,
+          v.id(projectId, 'id'),
+          checkWorkFolder(v.updateProjectInput(input, 'input'))
+        ),
         PROJECT_NOT_FOUND
       ),
     'projects:delete': (projectId) =>
@@ -102,6 +121,12 @@ export function createHandlers({
 
     'models:list': (refresh) => modelService.list(v.optional(v.bool)(refresh, 'refresh') ?? false),
     'models:getDefault': () => modelService.getDefaultModel(),
-    'models:setDefault': (modelId) => modelService.setDefaultModel(v.str(modelId, 'modelId'))
+    'models:setDefault': (modelId) => modelService.setDefaultModel(v.str(modelId, 'modelId')),
+
+    'settings:getAppearance': () => getAppearance(db),
+    'settings:setAppearance': (input) => setAppearance(db, v.appearanceInput(input, 'input')),
+
+    'dialog:selectFolder': (defaultPath) =>
+      selectFolder(v.optional(v.str)(defaultPath, 'defaultPath'))
   }
 }

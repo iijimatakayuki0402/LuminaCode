@@ -47,11 +47,27 @@ body {
   padding: 2rem;
 }
 .app h1 {
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: 'Cascadia Code', Consolas, monospace;
 }
 .muted {
   color: var(--muted);
+}
+
+/* DSN-04: アクセントカラーを文字に使う場合の色（ライトは明度を下げてコントラスト比 4.5:1 以上にする） */
+:root,
+:root[data-accent='cyan'] {
+  --accent-text: #1a73a8;
+}
+:root[data-accent='purple'] {
+  --accent-text: #6a4fc4;
+}
+:root[data-accent='red'] {
+  --accent-text: #b8424e;
+}
+:root[data-mode='dark'],
+:root[data-mode='dark'][data-accent] {
+  --accent-text: var(--accent);
 }
 
 /* 共通部品（DSN-01: 小さめの角丸、細い罫線、アクセントは枠線・ボタン・選択状態に絞る） */
@@ -78,7 +94,7 @@ body {
   font-family: 'Cascadia Code', Consolas, monospace;
   font-size: 1.25rem;
   letter-spacing: 0.04em;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .panel {
   background: var(--surface);
@@ -183,6 +199,299 @@ body {
 }
 .brand {
   font-family: 'Cascadia Code', Consolas, monospace;
-  color: var(--accent);
+  color: var(--accent-text);
   letter-spacing: 0.06em;
+}
+
+/* 種別色（10.3.1 の表）。バッジ・カードの帯にのみ使い、文字色には使わない */
+:root,
+:root[data-accent='cyan'] {
+  --type-chat: #7c6fd9;
+  --type-cowork: #de9a2e;
+}
+:root[data-accent='purple'] {
+  --type-chat: #2fa89a;
+  --type-cowork: #e0963c;
+}
+:root[data-accent='red'] {
+  --type-chat: #4f8fd6;
+  --type-cowork: #cda02b;
+}
+:root[data-mode='dark'],
+:root[data-mode='dark'][data-accent='cyan'] {
+  --type-chat: #a89cf0;
+  --type-cowork: #f4c062;
+}
+:root[data-mode='dark'][data-accent='purple'] {
+  --type-chat: #5cd3c4;
+  --type-cowork: #f2bc6a;
+}
+:root[data-mode='dark'][data-accent='red'] {
+  --type-chat: #86b8f0;
+  --type-cowork: #ebcb62;
+}
+.type-chat {
+  --type: var(--type-chat);
+}
+.type-cowork {
+  --type: var(--type-cowork);
+}
+
+/* ツールバー */
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+.toolbar .input {
+  flex: 1 1 14rem;
+}
+.check {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+/* プロジェクトカード */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.9rem;
+}
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--type);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.card.archived {
+  opacity: 0.7;
+}
+.card-title {
+  margin: 0;
+  font-size: 1rem;
+  word-break: break-word;
+}
+.card-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.card-path {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+.card-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+.btn-sm {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.8rem;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--type);
+  border-radius: var(--radius);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+.badge svg {
+  color: var(--type);
+}
+.pin {
+  color: var(--accent-text);
+  font-size: 0.8rem;
+}
+.empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ダイアログ */
+dialog.dialog {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  width: min(36rem, calc(100vw - 2rem));
+}
+dialog.dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+.dialog-head {
+  padding: 0.8rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  letter-spacing: 0.05em;
+}
+.dialog-body {
+  padding: 1rem 1.1rem;
+  max-height: 70vh;
+  overflow: auto;
+}
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1.1rem;
+  border-top: 1px solid var(--border);
+}
+/* 10.3: 危険操作の確認は他のダイアログと見た目を区別する */
+dialog.dialog.danger {
+  border-color: var(--danger);
+}
+dialog.dialog.danger .dialog-head {
+  background: var(--danger-bg);
+  border-bottom-color: var(--danger);
+}
+.textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+.hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.segmented {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.segmented label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  color: var(--fg);
+}
+.segmented label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* プロジェクト画面 */
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.project-screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 16rem 1fr;
+}
+.project-band {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  border-top: 3px solid var(--type);
+  background: var(--surface);
+}
+.project-band h1 {
+  margin: 0;
+  font-size: 1rem;
+}
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.thread-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+}
+.thread-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.thread-item > button.thread-open {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.45rem 0.5rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content {
+  overflow: auto;
+  padding: 1.25rem 1.5rem;
+}
+.statusbar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.75rem;
+  background: var(--surface);
+  margin-bottom: 1rem;
+}
+.statusbar strong {
+  color: var(--fg);
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
 }

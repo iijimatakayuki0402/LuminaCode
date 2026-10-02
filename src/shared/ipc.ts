@@ -5,8 +5,10 @@
 
 import type {
   ApiKeyStatus,
+  Appearance,
   CreateProjectInput,
   CreateThreadInput,
+  ListProjectsOptions,
   Message,
   ModelList,
   Project,
@@ -26,7 +28,7 @@ export interface AppInfo {
 export interface IpcContract {
   'app:getInfo': { args: []; result: AppInfo }
 
-  'projects:list': { args: []; result: Project[] }
+  'projects:list': { args: [options?: ListProjectsOptions]; result: Project[] }
   'projects:get': { args: [id: string]; result: Project }
   'projects:create': { args: [input: CreateProjectInput]; result: Project }
   'projects:update': { args: [id: string, input: UpdateProjectInput]; result: Project }
@@ -50,6 +52,12 @@ export interface IpcContract {
   'models:list': { args: [refresh?: boolean]; result: ModelList }
   'models:getDefault': { args: []; result: string | null }
   'models:setDefault': { args: [modelId: string]; result: void }
+
+  'settings:getAppearance': { args: []; result: Appearance }
+  'settings:setAppearance': { args: [input: Partial<Appearance>]; result: Appearance }
+
+  /** フォルダ選択ダイアログ（キャンセル時は null） */
+  'dialog:selectFolder': { args: [defaultPath?: string]; result: string | null }
 }
 
 export type IpcChannel = keyof IpcContract
@@ -135,5 +143,12 @@ export interface LuminaApi {
     list: Invoke<'models:list'>
     getDefault: Invoke<'models:getDefault'>
     setDefault: Invoke<'models:setDefault'>
+  }
+  settings: {
+    getAppearance: Invoke<'settings:getAppearance'>
+    setAppearance: Invoke<'settings:setAppearance'>
+  }
+  dialog: {
+    selectFolder: Invoke<'dialog:selectFolder'>
   }
 }

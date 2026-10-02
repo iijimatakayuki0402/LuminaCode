@@ -10,7 +10,8 @@ export const ja = {
   },
   nav: {
     settings: '設定',
-    home: 'ホーム'
+    home: 'ホーム',
+    dashboard: 'ダッシュボード'
   },
   setup: {
     title: 'SETUP / API キーの登録',
@@ -48,7 +49,94 @@ export const ja = {
     needKey: 'API キーを登録すると、モデル一覧を取得できます。',
     saved: '既定のモデルを変更しました。'
   },
-  home: {
-    placeholder: 'ダッシュボードは次の段階で実装します。'
+  projectType: {
+    chat: 'チャット',
+    cowork: 'Cowork'
+  },
+  permissionMode: {
+    confirm_each: '毎回確認',
+    auto_edit: '編集を自動許可',
+    plan_only: '計画のみ'
+  },
+  dashboard: {
+    title: 'PROJECTS',
+    create: '新規プロジェクト',
+    search: 'プロジェクト名で検索',
+    filterAll: 'すべての種別',
+    sortLabel: '並び順',
+    sortUpdated: '最終更新順',
+    sortCreated: '作成順',
+    sortName: '名前順',
+    showArchived: 'アーカイブを表示',
+    empty: 'プロジェクトがありません。「新規プロジェクト」から作成してください。',
+    noMatch: '条件に一致するプロジェクトはありません。',
+    updatedAt: (date: string) => `最終更新 ${date}`,
+    pinned: 'ピン留め中',
+    archived: 'アーカイブ済み',
+    open: '開く',
+    edit: '編集',
+    duplicate: '複製',
+    pin: 'ピン留め',
+    unpin: 'ピン留めを外す',
+    archive: 'アーカイブ',
+    unarchive: 'アーカイブから戻す',
+    delete: '削除',
+    deleteTitle: 'プロジェクトの削除',
+    deleteMessage: (name: string) =>
+      `「${name}」を削除します。スレッドと会話の履歴も削除され、元に戻せません。`,
+    deleteCoworkNote: '作業フォルダ内のファイルは削除されません。',
+    copySuffix: ' のコピー',
+    keyRequired: 'API キーを登録すると、プロジェクトを開けます。'
+  },
+  projectDialog: {
+    createTitle: '新規プロジェクト',
+    editTitle: 'プロジェクトの編集',
+    duplicateTitle: 'プロジェクトの複製',
+    type: '種別',
+    typeLocked: '種別は作成後に変更できません。変更したい場合は「複製」で作り直してください。',
+    name: 'プロジェクト名',
+    customInstructions: 'カスタム指示（任意）',
+    workFolder: '作業フォルダ',
+    browse: '参照…',
+    workFolderHint: 'Cowork はこのフォルダの中だけを操作します。',
+    model: 'モデル（任意）',
+    useDefault: (model: string | null) => `全体の既定を使う${model ? `（${model}）` : ''}`,
+    permissionMode: '権限モード',
+    submitCreate: '作成',
+    submitSave: '保存',
+    count: (n: number, max: number) => `${n.toLocaleString()} / ${max.toLocaleString()} 文字`,
+    changeFolderTitle: '作業フォルダの変更',
+    changeFolderLead: '作業フォルダを変更します。以後の Cowork の操作対象が切り替わります。',
+    changeFolderFrom: '変更前',
+    changeFolderTo: '変更後',
+    changeFolderConfirm: '変更する'
+  },
+  project: {
+    back: '一覧へ戻る',
+    threads: 'スレッド',
+    newThread: '新規スレッド',
+    untitled: '無題のスレッド',
+    rename: '名前を変更',
+    renameSave: '変更',
+    delete: '削除',
+    deleteTitle: 'スレッドの削除',
+    deleteMessage: (title: string) => `「${title}」を削除します。会話の履歴は元に戻せません。`,
+    noThreads: 'スレッドがありません。「新規スレッド」から始めてください。',
+    model: 'モデル',
+    modelSource: { thread: 'スレッド', project: 'プロジェクト', default: '全体の既定' },
+    noModel: '未選択（設定画面でモデル一覧を更新してください）',
+    threadModel: 'このスレッドのモデル',
+    inherit: (model: string | null) =>
+      `プロジェクト／全体の設定を使う${model ? `（${model}）` : ''}`,
+    chatComingSoon: '会話の送受信は次の段階で実装します。',
+    workFolder: '作業フォルダ',
+    permissionMode: '権限モード'
+  },
+  appearance: {
+    section: '表示',
+    mode: '表示モード',
+    modes: { dark: 'ダーク', light: 'ライト', system: '標準（OS の設定に従う）' },
+    accent: 'アクセントカラー',
+    accents: { purple: '薄紫', cyan: '水色', red: '薄い赤' }
   }
 } as const

@@ -4,12 +4,12 @@
 
 import type Anthropic from '@anthropic-ai/sdk'
 import type Database from 'better-sqlite3'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcChannel, IpcResult } from '../../src/shared/ipc'
-import type { ApiKeyStatus, ModelList, Project, Thread } from '../../src/shared/types'
+import type { ApiKeyStatus, Appearance, ModelList, Project, Thread } from '../../src/shared/types'
 import { createInMemoryDatabase } from '../../src/main/db/init'
 import { createHandlers, type IpcHandlers } from '../../src/main/ipc/handlers'
 import { invokeHandler } from '../../src/main/ipc/register'
@@ -34,6 +34,7 @@ let handlers: IpcHandlers
 let dir: string
 let keyFile: string
 let usedKeys: string[]
+let selectedFolder: string | null = null
 
 const call = <T = unknown>(channel: IpcChannel, ...args: unknown[]): Promise<IpcResult<T>> =>
   invokeHandler(handlers, channel, true, args) as Promise<IpcResult<T>>
@@ -69,6 +70,12 @@ beforeEach(() => {
     apiKeyStore,
     modelService,
     createClient,
+    workFolderPolicy: {
+      userDataPath: join(dir, 'userData'),
+      homeDir: join(dir, 'home'),
+      systemRoot: join(dir, 'Windows')
+    },
+    selectFolder: async (defaultPath) => selectedFolder ?? defaultPath ?? null,
     appInfo: { version: '0.1.0', electron: 'e', chrome: 'c', dataPath: 'C:\\data' }
   })
 })
@@ -273,5 +280,86 @@ describe('apiKey / models（要件 KEY-01〜04、MDL-01〜05）', () => {
     expect(await call('apiKey:save', 123)).toMatchObject({ error: { code: 'invalid_argument' } })
     expect(await call('apiKey:save', '')).toMatchObject({ error: { code: 'validation' } })
     expect(await call('models:list', 'yes')).toMatchObject({ error: { code: 'invalid_argument' } })
+  })
+})
+
+describe('Stage 4: 作業フォルダ・一覧・表示設定・フォルダ選択', () => {
+  it('Cowork の作業フォルダを検証して実体パスで保存する（PRJ-05）', async () => {
+    const work = join(dir, 'work')
+    mkdirSync(work)
+
+    const project = await value<Project>('projects:create', {
+      type: 'cowork',
+      name: 'C',
+      work_folder: work
+    })
+    expect(project.work_folder).toBe(realpathSync.native(work))
+  })
+
+  it('指定できないフォルダ・存在しないフォルダは validation（作成・更新とも）', async () => {
+    const userData = join(dir, 'userData')
+    mkdirSync(userData)
+    expect(
+      await call('projects:create', { type: 'cowork', name: 'C', work_folder: userData })
+    ).toMatchObject({
+      error: { code: 'validation', message: expect.stringContaining('データ保存先') }
+    })
+    expect(
+      await call('projects:create', { type: 'cowork', name: 'C', work_folder: join(dir, 'none') })
+    ).toMatchObject({
+      error: { code: 'validation', message: expect.stringContaining('見つかりません') }
+    })
+
+    const work = join(dir, 'work')
+    mkdirSync(work)
+    const project = await value<Project>('projects:create', {
+      type: 'cowork',
+      name: 'C',
+      work_folder: work
+    })
+    expect(await call('projects:update', project.id, { work_folder: userData })).toMatchObject({
+      error: { code: 'validation' }
+    })
+  })
+
+  it('アーカイブ済みは既定で一覧に含めず、指定すれば含める（DSH-07）', async () => {
+    const a = await value<Project>('projects:create', { type: 'chat', name: 'A' })
+    await value<Project>('projects:create', { type: 'chat', name: 'B' })
+    await value('projects:update', a.id, { archived: true })
+
+    expect(await value<Project[]>('projects:list')).toHaveLength(1)
+    expect(await value<Project[]>('projects:list', { includeArchived: true })).toHaveLength(2)
+    expect(await call('projects:list', { includeArchived: 'yes' })).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+  })
+
+  it('表示設定の既定値は標準・水色で、変更が保持される（CMN-01、CMN-06）', async () => {
+    expect(await value<Appearance>('settings:getAppearance')).toEqual({
+      mode: 'system',
+      accent: 'cyan'
+    })
+    expect(await value<Appearance>('settings:setAppearance', { accent: 'purple' })).toEqual({
+      mode: 'system',
+      accent: 'purple'
+    })
+    await value('settings:setAppearance', { mode: 'dark' })
+    expect(await value<Appearance>('settings:getAppearance')).toEqual({
+      mode: 'dark',
+      accent: 'purple'
+    })
+    expect(await call('settings:setAppearance', { accent: 'green' })).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+  })
+
+  it('フォルダ選択の結果を返す（キャンセル時は null）', async () => {
+    selectedFolder = 'picked-folder'
+    expect(await value('dialog:selectFolder')).toBe('picked-folder')
+    selectedFolder = null
+    expect(await value('dialog:selectFolder')).toBeNull()
+    expect(await call('dialog:selectFolder', 1)).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
   })
 })

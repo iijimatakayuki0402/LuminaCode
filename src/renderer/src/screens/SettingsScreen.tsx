@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
-import type { ApiKeyStatus, ModelList } from '@shared/types'
+import { ACCENTS, MODES } from '@shared/theme'
+import type { ApiKeyStatus, Appearance, ModelList } from '@shared/types'
 import { ApiKeyForm } from '../components/ApiKeyForm'
 import { Message, type MessageState } from '../components/Message'
 import { unwrap } from '../lib/ipc'
@@ -10,18 +11,95 @@ import { ja } from '../locales/ja'
  */
 export function SettingsScreen({
   status,
-  onStatusChange
+  onStatusChange,
+  appearance,
+  onAppearanceChange
 }: {
   status: ApiKeyStatus
   onStatusChange: (status: ApiKeyStatus) => void
+  appearance: Appearance
+  onAppearanceChange: (appearance: Appearance) => void
 }): React.JSX.Element {
   return (
     <main className="screen">
       <h1 className="screen-title">SETTINGS</h1>
       <ApiKeySection status={status} onStatusChange={onStatusChange} />
       <ModelSection configured={status.configured} />
+      <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
     </main>
   )
+}
+
+/**
+ * 表示設定（要件 CMN-01、CMN-06: 変更は即時に反映し、再起動後も保持する）
+ */
+function AppearanceSection({
+  appearance,
+  onChange
+}: {
+  appearance: Appearance
+  onChange: (appearance: Appearance) => void
+}): React.JSX.Element {
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  const update = async (input: Partial<Appearance>): Promise<void> => {
+    try {
+      onChange(await unwrap(window.lumina.settings.setAppearance(input)))
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="settings-appearance">
+      <h2 id="settings-appearance">{ja.appearance.section}</h2>
+      <fieldset className="field" style={{ border: 'none', padding: 0 }}>
+        <legend className="hint" style={{ marginBottom: '0.35rem' }}>
+          {ja.appearance.mode}
+        </legend>
+        <div className="segmented">
+          {MODES.map((mode) => (
+            <label key={mode}>
+              <input
+                type="radio"
+                name="appearance-mode"
+                checked={appearance.mode === mode}
+                onChange={() => void update({ mode })}
+              />
+              {ja.appearance.modes[mode]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="field" style={{ border: 'none', padding: 0 }}>
+        <legend className="hint" style={{ marginBottom: '0.35rem' }}>
+          {ja.appearance.accent}
+        </legend>
+        <div className="segmented">
+          {ACCENTS.map((accent) => (
+            <label key={accent}>
+              <input
+                type="radio"
+                name="appearance-accent"
+                checked={appearance.accent === accent}
+                onChange={() => void update({ accent })}
+              />
+              <span className="swatch" style={{ background: SWATCH[accent] }} aria-hidden="true" />
+              {ja.appearance.accents[accent]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <Message message={message} />
+    </section>
+  )
+}
+
+// 選択肢の見本色（10.3.1 のライト用の値）
+const SWATCH: Record<Appearance['accent'], string> = {
+  purple: '#8b6fd6',
+  cyan: '#2a9dd6',
+  red: '#e0707a'
 }
 
 function ApiKeySection({

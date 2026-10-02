@@ -41,6 +41,13 @@ const api: LuminaApi = {
     list: invoke('models:list'),
     getDefault: invoke('models:getDefault'),
     setDefault: invoke('models:setDefault')
+  },
+  settings: {
+    getAppearance: invoke('settings:getAppearance'),
+    setAppearance: invoke('settings:setAppearance')
+  },
+  dialog: {
+    selectFolder: invoke('dialog:selectFolder')
   }
 }
 

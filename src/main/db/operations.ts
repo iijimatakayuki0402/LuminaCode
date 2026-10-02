@@ -246,10 +246,17 @@ export function deleteProject(db: Database.Database, id: string): boolean {
   return result.changes > 0
 }
 
-export function listProjects(db: Database.Database): Project[] {
+/**
+ * プロジェクト一覧（ピン留め優先、更新日時の新しい順）
+ * アーカイブ済みは既定で含めない（要件 DSH-07）
+ */
+export function listProjects(
+  db: Database.Database,
+  options: { includeArchived?: boolean } = {}
+): Project[] {
   const stmt = db.prepare(`
     SELECT * FROM projects
-    WHERE archived = 0
+    ${options.includeArchived ? '' : 'WHERE archived = 0'}
     ORDER BY pinned DESC, updated_at DESC
   `)
   const rows = stmt.all() as ProjectRow[]

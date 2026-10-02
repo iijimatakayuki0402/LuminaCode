@@ -2,6 +2,8 @@
  * main と renderer で共有するエンティティ型（要件定義書 8 章）
  */
 
+import type { Accent, Mode } from './theme'
+
 export type ProjectType = 'chat' | 'cowork'
 export type PermissionMode = 'confirm_each' | 'auto_edit' | 'plan_only'
 export type MessageRole = 'user' | 'assistant'
@@ -82,6 +84,19 @@ export interface UpdateThreadInput {
   title?: string
   model?: string
   extended_thinking?: boolean
+}
+
+export interface ListProjectsOptions {
+  includeArchived?: boolean
+}
+
+// ========================================
+// 表示設定（要件 CMN-01、CMN-06）
+// ========================================
+
+export interface Appearance {
+  mode: Mode
+  accent: Accent
 }
 
 // ========================================
