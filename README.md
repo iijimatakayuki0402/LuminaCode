@@ -25,7 +25,6 @@ npm install
 npm approve-scripts electron better-sqlite3 esbuild   # 初回のみ（install スクリプトの承認）
 npm rebuild electron esbuild
 node node_modules/electron/install.js                 # Electron 本体の取得
-npm run rebuild                                       # better-sqlite3 を Electron 用に再ビルド
 ```
 
 ## コマンド
@@ -37,6 +36,7 @@ npm run rebuild                                       # better-sqlite3 を Elect
 | `npm run typecheck`               | 型チェック                            |
 | `npm run lint` / `npm run format` | Lint ／ 整形                          |
 | `npm test`                        | テスト（Vitest）                      |
+| `npm run test:electron`           | テストを Electron のランタイムで実行  |
 | `npm run dist`                    | Windows インストーラー作成（`dist/`） |
 
 ## 技術検証スクリプト（Phase 0）
@@ -65,5 +65,5 @@ scripts/     環境構築・運用スクリプト
 
 ## 注意
 
-- `better-sqlite3` は **Electron 用にビルド**されています。Vitest（Node）から直接読み込むと ABI 不一致になります。DB を使うテストは、DB アクセス層を分離するか、Node 用に再ビルドして実行してください。
+- `better-sqlite3`（v13）は N-API 版の同梱バイナリ（`prebuilds/`）を使うため、Node と Electron の両方でそのまま動きます（再ビルド不要）。本番と同じランタイムで確認したい場合は `npm run test:electron` を使います。
 - API キーは `.env` に書かず、アプリの設定画面から登録します（DPAPI で暗号化保存）。

@@ -3,8 +3,6 @@
  * SQLiteテーブル構造と初期化クエリ
  */
 
-export const SCHEMA_VERSION = 1
-
 /**
  * プロジェクト（通常チャット / Cowork）
  */
@@ -16,11 +14,13 @@ CREATE TABLE IF NOT EXISTS projects (
   custom_instructions TEXT CHECK(length(custom_instructions) <= 20000),
   work_folder TEXT,
   model TEXT,
-  permission_mode TEXT CHECK(permission_mode IN ('confirm_each', 'auto_edit', 'plan_only')) DEFAULT 'confirm_each',
+  permission_mode TEXT NOT NULL DEFAULT 'confirm_each' CHECK(permission_mode IN ('confirm_each', 'auto_edit', 'plan_only')),
   pinned INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  -- 要件 PRJ-03: Cowork は作業フォルダ必須、通常チャットは作業フォルダを持たない
+  CHECK((type = 'cowork' AND work_folder IS NOT NULL) OR (type = 'chat' AND work_folder IS NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_type ON projects(type);
@@ -38,12 +38,14 @@ CREATE TABLE IF NOT EXISTS threads (
   title TEXT,
   model TEXT,
   extended_thinking INTEGER NOT NULL DEFAULT 0,
+  last_opened_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_threads_project ON threads(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_last_opened ON threads(project_id, last_opened_at DESC);
 `
 
 /**
@@ -87,6 +89,13 @@ CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 
 /**
  * ツールイベント（Cowork操作ログ）
+ * 要件 LOG-01: 自動許可された操作（読み取り、編集を自動許可モード）も含めてすべて記録する
+ * permission_method:
+ *   auto                   権限モードにより自動許可
+ *   allowed_once           今回だけ許可
+ *   allowed_always_thread  このスレッドでは常に許可
+ *   allowed_always_project このプロジェクトでは常に許可
+ *   denied                 拒否（ユーザー拒否、計画のみモード、作業フォルダ外など）
  */
 export const CREATE_TOOL_EVENTS_TABLE = `
 CREATE TABLE IF NOT EXISTS tool_events (
@@ -96,7 +105,7 @@ CREATE TABLE IF NOT EXISTS tool_events (
   target TEXT,
   command TEXT,
   result TEXT,
-  permission_method TEXT CHECK(permission_method IN ('allowed_once', 'allowed_always', 'denied')),
+  permission_method TEXT NOT NULL CHECK(permission_method IN ('auto', 'allowed_once', 'allowed_always_thread', 'allowed_always_project', 'denied')),
   created_at INTEGER NOT NULL,
   FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
 );
@@ -107,11 +116,14 @@ CREATE INDEX IF NOT EXISTS idx_tool_events_tool ON tool_events(tool_name, create
 
 /**
  * 使用量記録（トークン数とコスト）
+ * 要件 USG-02〜04: 月別集計と上限判定のため、プロジェクト・スレッド削除後も記録を残す。
+ * 削除後も表示できるよう、記録時点のプロジェクト名を project_name に保持する。
  */
 export const CREATE_USAGE_RECORDS_TABLE = `
 CREATE TABLE IF NOT EXISTS usage_records (
   id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
+  project_id TEXT,
+  project_name TEXT NOT NULL,
   thread_id TEXT,
   message_id TEXT,
   model TEXT NOT NULL,
@@ -121,7 +133,7 @@ CREATE TABLE IF NOT EXISTS usage_records (
   cache_write_tokens INTEGER NOT NULL DEFAULT 0,
   estimated_cost REAL NOT NULL,
   created_at INTEGER NOT NULL,
-  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
   FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE SET NULL,
   FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
 );
@@ -145,13 +157,17 @@ CREATE TABLE IF NOT EXISTS settings (
 
 /**
  * スナップショット（Cowork変更前の内容）
+ * 内容はアプリのデータ保存先（snapshots 配下）にファイルとして保存し、DB には参照のみを持つ
+ * file_path: 変更対象の元ファイル、stored_path: 保存したスナップショットのファイル
  */
 export const CREATE_SNAPSHOTS_TABLE = `
 CREATE TABLE IF NOT EXISTS snapshots (
   id TEXT PRIMARY KEY,
   thread_id TEXT NOT NULL,
   file_path TEXT NOT NULL,
-  content BLOB NOT NULL,
+  stored_path TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
 );
@@ -171,16 +187,29 @@ CREATE TABLE IF NOT EXISTS schema_version (
 `
 
 /**
- * すべてのテーブル作成SQLの配列
+ * マイグレーション定義
+ * version ごとに適用する SQL。既存 DB にはその version より新しいものだけを順に適用する。
+ * 適用済みの SQL は変更せず、スキーマ変更は新しい version を追加して行う。
  */
-export const ALL_TABLE_DEFINITIONS = [
-  CREATE_SCHEMA_VERSION_TABLE,
-  CREATE_PROJECTS_TABLE,
-  CREATE_THREADS_TABLE,
-  CREATE_MESSAGES_TABLE,
-  CREATE_ATTACHMENTS_TABLE,
-  CREATE_TOOL_EVENTS_TABLE,
-  CREATE_USAGE_RECORDS_TABLE,
-  CREATE_SETTINGS_TABLE,
-  CREATE_SNAPSHOTS_TABLE
+export interface Migration {
+  version: number
+  statements: string[]
+}
+
+export const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    statements: [
+      CREATE_PROJECTS_TABLE,
+      CREATE_THREADS_TABLE,
+      CREATE_MESSAGES_TABLE,
+      CREATE_ATTACHMENTS_TABLE,
+      CREATE_TOOL_EVENTS_TABLE,
+      CREATE_USAGE_RECORDS_TABLE,
+      CREATE_SETTINGS_TABLE,
+      CREATE_SNAPSHOTS_TABLE
+    ]
+  }
 ]
+
+export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version

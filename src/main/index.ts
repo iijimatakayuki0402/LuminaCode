@@ -1,6 +1,10 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 
+// 要件 5.3: データ保存先を %APPDATA%\LuminaCode\ に固定する（既定はパッケージ名で決まるため明示する）
+// userData を参照する処理（DB 等）より前、ready 前に設定する必要がある
+app.setPath('userData', join(app.getPath('appData'), 'LuminaCode'))
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1200,

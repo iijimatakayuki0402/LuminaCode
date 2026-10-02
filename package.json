@@ -15,7 +15,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "test:electron": "node scripts/test-electron.mjs",
     "dist": "npm run build && electron-builder --win"
   },
   "dependencies": {
