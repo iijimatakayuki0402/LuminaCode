@@ -44,6 +44,8 @@ import * as ops from '../db/operations'
 import type { ModelService } from '../models/modelService'
 import type { UsageService } from '../usage/usageService'
 import type { TitleGenerator } from '../chat/titleGenerator'
+import { buildSkillPlugin, getCoworkSettings, listSkills, SKILL_PLUGIN_NAME } from './extensions'
+import type { McpStore } from './mcpStore'
 import {
   classifyTool,
   decide,
@@ -69,6 +71,9 @@ import {
 import { moveToTrash, sizeOf } from './trash'
 
 const { ValidationError } = ops
+
+/** Web のツール（6.6: プロジェクトの設定でオンにした場合のみ使える） */
+const WEB_TOOLS = ['WebSearch', 'WebFetch']
 
 /** Cowork で使えるツール（Web は既定でオフ。6.6） */
 const TOOLS = [
@@ -145,6 +150,10 @@ export interface CoworkServiceDeps {
   getGlobalInstructions?: () => string
   /** タイトルの自動生成（THR-03） */
   titles?: Pick<TitleGenerator, 'generate'>
+  /** プロジェクトで設定した MCP サーバー（6.6） */
+  mcp?: Pick<McpStore, 'toSdkConfig'>
+  /** 信頼済みのスキルを渡すプラグインのフォルダの置き場所（6.6） */
+  pluginsRoot?: string
   /** 上限の確認と概算コスト（USG）。テストでは省略できる */
   usage?: Pick<UsageService, 'check' | 'estimate'>
   /** テストで Agent SDK を差し替える */
@@ -603,6 +612,15 @@ export class CoworkService {
     const signal = run.controller.signal
     const recorded = new Set<string>()
     const { query, tool, createSdkMcpServer } = await this.loadSdk()
+    const webAccess = getCoworkSettings(db, project.id).webAccess
+    let skillPlugin: string | null = null
+    if (this.deps.pluginsRoot) {
+      try {
+        skillPlugin = buildSkillPlugin(db, project.id, workRoot, this.deps.pluginsRoot)
+      } catch (error) {
+        console.warn('[cowork] skills were not loaded:', (error as Error).message)
+      }
+    }
     const threadRow = ops.getThread(db, threadId)
     const modelInfo = this.deps.modelService.getModelInfo(model)
     const effort =
@@ -651,7 +669,10 @@ export class CoworkService {
         input.tool_input,
         toolUseId ?? input.tool_use_id,
         signal,
-        recorded
+        recorded,
+        input.agent_id ?? null,
+        webAccess,
+        skillPlugin
       )
       return {
         hookSpecificOutput: {
@@ -683,9 +704,20 @@ export class CoworkService {
       abortController: run.controller,
       includePartialMessages: true,
       settingSources: [],
-      tools: TOOLS,
-      disallowedTools: ['WebSearch', 'WebFetch'],
-      mcpServers: { lumina: createSdkMcpServer({ name: 'lumina', tools: [deleteTool] }) },
+      // 6.6: Web は設定でオンにした場合のみ。スキルは信頼済みの場合のみ
+      tools: [...TOOLS, ...(webAccess ? WEB_TOOLS : []), ...(skillPlugin ? ['Skill'] : [])],
+      disallowedTools: webAccess ? [] : WEB_TOOLS,
+      mcpServers: {
+        ...((this.deps.mcp?.toSdkConfig(project.id) ?? {}) as Options['mcpServers']),
+        lumina: createSdkMcpServer({ name: 'lumina', tools: [deleteTool] })
+      },
+      // 6.6: 有効にするのは信頼済みのプロジェクトのスキルだけ（Claude Code の組み込みのスキルは使わない）
+      ...(skillPlugin
+        ? {
+            plugins: [{ type: 'local' as const, path: skillPlugin, skipMcpDiscovery: true }],
+            skills: listSkills(workRoot).map((skill) => `${SKILL_PLUGIN_NAME}:${skill.name}`)
+          }
+        : { skills: [] }),
       permissionMode: project.permission_mode === 'plan_only' ? 'plan' : 'default',
       // フックで判定済みのため、ここに来るのは想定外の確認要求のみ。安全側で拒否する
       canUseTool: async (name) => ({
@@ -721,6 +753,10 @@ export class CoworkService {
             message.session_id,
             threadId
           )
+          const pluginErrors = (message as { plugin_errors?: { message?: string }[] }).plugin_errors
+          if (pluginErrors?.length) {
+            console.warn(`[cowork] plugin errors: ${pluginErrors.map((e) => e.message).join('; ')}`)
+          }
         } else if (message.type === 'system' && message.subtype === 'api_retry') {
           emit({
             type: 'retrying',
@@ -833,10 +869,15 @@ export class CoworkService {
     toolInput: unknown,
     toolUseId: string,
     signal: AbortSignal,
-    recorded: Set<string>
+    recorded: Set<string>,
+    agentId: string | null = null,
+    webAccess = false,
+    skillPlugin: string | null = null
   ): Promise<{ allow: boolean; reason?: string }> {
     const { db, emit } = this.deps
-    const classified = classifyTool(toolName, toolInput, workRoot)
+    // 信頼済みのスキルのコピーは読み取りのみ許す（スキルに付属するファイルの参照のため）
+    const readRoots = skillPlugin ? [skillPlugin] : []
+    const classified = classifyTool(toolName, toolInput, workRoot, readRoots)
     const includesFolder = classified.paths.some((p) => existsSync(p) && statSync(p).isDirectory())
     const current = ops.getProject(db, project.id) ?? project
     const decision = decide(classified, {
@@ -844,7 +885,9 @@ export class CoworkService {
       always: this.getAlways(project.id, threadId),
       commandRules: this.getPrefs(),
       workRoot,
-      includesFolder
+      includesFolder,
+      webAccess,
+      extraRoots: readRoots
     })
 
     const target =
@@ -862,7 +905,8 @@ export class CoworkService {
         target,
         command: classified.command ?? null,
         method,
-        result
+        result,
+        agentId
       })
       emit({ type: 'tool', threadId, messageId, event })
     }
@@ -956,6 +1000,8 @@ export class CoworkService {
     if (toolName === 'Bash' || toolName === 'PowerShell') {
       return typeof args['description'] === 'string' ? args['description'] : null
     }
+    // Web 取得では、取得した内容をどう使うかの指示を示す
+    if (toolName === 'WebFetch') return clip(args['prompt'])
     return null
   }
 

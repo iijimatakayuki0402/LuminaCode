@@ -16,6 +16,7 @@ import { unwrap } from '../lib/ipc'
 import { useModels } from '../lib/useModels'
 import { ChatView } from './ChatView'
 import { TrashDialog } from '../components/CoworkParts'
+import { CoworkSidePanel } from '../components/CoworkSidePanel'
 import { ja } from '../locales/ja'
 
 const threadTitle = (thread: Thread): string => thread.title ?? ja.project.untitled
@@ -216,7 +217,7 @@ export function ProjectScreen({
         )}
       </div>
 
-      <div className="workspace">
+      <div className={`workspace${project.type === 'cowork' ? ' with-panel' : ''}`}>
         <aside className="sidebar" aria-label={ja.project.threads}>
           <button className="btn btn-primary" type="button" onClick={() => void createThread()}>
             + {ja.project.newThread}
@@ -335,7 +336,6 @@ export function ProjectScreen({
                   : ja.usage.exceededWarn}
             </p>
           )}
-          {project.type === 'cowork' && <p className="hint">{ja.cowork.commandLimit}</p>}
 
           <Message message={message} />
 
@@ -416,6 +416,7 @@ export function ProjectScreen({
             </>
           )}
         </section>
+        {project.type === 'cowork' && <CoworkSidePanel projectId={project.id} />}
       </div>
 
       {trashOpen && <TrashDialog projectId={project.id} onClose={() => setTrashOpen(false)} />}

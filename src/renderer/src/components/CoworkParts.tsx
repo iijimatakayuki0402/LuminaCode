@@ -40,9 +40,17 @@ export function ToolEventList({ events }: { events: ToolEventInfo[] }): React.JS
           return (
             <li
               key={e.id}
-              className={`tool-line${denied ? ' denied' : failed ? ' failed' : running ? ' running' : ''}`}
+              className={`tool-line${denied ? ' denied' : failed ? ' failed' : running ? ' running' : ''}${e.agent_id ? ' subagent' : ''}`}
             >
-              <span className="tool-name">{shortTool(e.tool_name)}</span>
+              {/* 6.6: サブエージェントの実行は入れ子で示す */}
+              <span className="tool-name">
+                {e.agent_id && (
+                  <span className="hint" title={ja.panel.subagent}>
+                    ↳{' '}
+                  </span>
+                )}
+                {shortTool(e.tool_name)}
+              </span>
               <span className="tool-target">{e.command ? `$ ${e.command}` : (e.target ?? '')}</span>
               <span className="tool-method">
                 {running ? ja.cowork.running : ja.cowork.method[e.permission_method]}

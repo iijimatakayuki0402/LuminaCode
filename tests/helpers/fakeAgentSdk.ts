@@ -10,6 +10,8 @@ import { dirname, resolve } from 'node:path'
 export interface ScriptedCall {
   tool: string
   input: Record<string, unknown>
+  /** サブエージェントからの呼び出し */
+  agentId?: string
 }
 
 export interface Script {
@@ -69,7 +71,8 @@ export function fakeAgentSdk(scripts: Script[]): FakeAgent {
             hook_event_name: 'PreToolUse',
             tool_name: call.tool,
             tool_input: call.input,
-            tool_use_id: toolUseId
+            tool_use_id: toolUseId,
+            ...(call.agentId ? { agent_id: call.agentId } : {})
           } as never,
           toolUseId,
           { signal }

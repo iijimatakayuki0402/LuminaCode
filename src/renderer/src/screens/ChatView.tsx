@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { expandCommand, parseCommandInput } from '@shared/commands'
 import { activePath, siblingsOf } from '@shared/conversation'
 import type {
   AttachmentInfo,
   ChatPrefs,
   ContextUsage,
+  SlashCommand,
   Thread,
   Message,
   PermissionRequest,
@@ -71,6 +73,8 @@ export function ChatView({
   const [summary, setSummary] = useState<string | null>(null)
   const [context, setContext] = useState<ContextUsage | null>(null)
   const [compacting, setCompacting] = useState<'confirm' | 'running' | null>(null)
+  /** 6.6: 作業フォルダのスラッシュコマンド（Cowork） */
+  const [commands, setCommands] = useState<SlashCommand[]>([])
   const [tools, setTools] = useState<ToolEventInfo[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
@@ -103,6 +107,12 @@ export function ChatView({
     ])
       .then(([list, p, events, thread, ctx]) => {
         if (!active) return
+        if (cowork) {
+          void unwrap(window.lumina.threads.get(threadId))
+            .then((t) => unwrap(window.lumina.cowork.commands(t.project_id)))
+            .then((c) => active && setCommands(c))
+            .catch(() => undefined)
+        }
         setMessages(list)
         setLeafId(thread.active_leaf_id)
         setSummary(thread.context_summary)
@@ -469,6 +479,7 @@ export function ChatView({
         generating={generating}
         disabled={!online}
         allowAttachments={!cowork}
+        commands={commands}
         onSend={send}
         onStop={stop}
         onError={fail}
@@ -804,6 +815,7 @@ function Composer({
   generating,
   disabled,
   allowAttachments,
+  commands,
   onSend,
   onStop,
   onError
@@ -812,6 +824,7 @@ function Composer({
   generating: boolean
   disabled: boolean
   allowAttachments: boolean
+  commands: SlashCommand[]
   onSend: (content: string, attachments: AttachmentInfo[]) => Promise<boolean>
   onStop: () => void
   onError: (e: unknown) => void
@@ -823,6 +836,15 @@ function Composer({
 
   const canSend =
     !generating && !disabled && !sending && (text.trim() !== '' || staging.items.length > 0)
+
+  // 6.6: 「/名前」で候補を出し、選ぶと本文を展開する（送信前に内容を確認できる）
+  const typed = parseCommandInput(text)
+  const suggestions =
+    typed && !text.includes('\n')
+      ? commands.filter((c) => c.name.startsWith(typed.name)).slice(0, 8)
+      : []
+  const applyCommand = (command: SlashCommand): void =>
+    setText(expandCommand(command.content, typed?.args ?? ''))
 
   const submit = async (): Promise<void> => {
     if (!canSend) return
@@ -883,6 +905,18 @@ function Composer({
     >
       {dragging && <div className="drop-hint">{ja.chat.dropHere}</div>}
       <AttachmentChips items={staging.items} onRemove={staging.remove} />
+      {suggestions.length > 0 && (
+        <ul className="command-list" role="listbox" aria-label={ja.chat.commands}>
+          {suggestions.map((c) => (
+            <li key={c.name}>
+              <button type="button" className="command-item" onClick={() => applyCommand(c)}>
+                <span className="mono">/{c.name}</span>
+                {c.description && <span className="hint">{c.description}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <textarea
         className="input textarea composer-input"
         value={text}

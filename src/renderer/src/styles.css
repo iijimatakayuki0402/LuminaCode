@@ -1043,3 +1043,134 @@ mark {
   outline-offset: 2px;
   border-radius: var(--radius);
 }
+
+/* Cowork の右パネル（COW-08、6.6） */
+.workspace.with-panel {
+  grid-template-columns: 16rem 1fr 19rem;
+}
+.side-panel {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  padding: 0.5rem;
+  cursor: pointer;
+}
+.tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.panel-body {
+  overflow: auto;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+.panel-heading {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  padding: 0.15rem 0.3rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.tree-item:hover {
+  background: var(--accent-bg);
+}
+.tree-icon {
+  width: 0.8rem;
+  color: var(--muted);
+}
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-preview {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 60vh;
+  overflow: auto;
+  margin: 0;
+}
+.image-preview {
+  max-width: 100%;
+  max-height: 60vh;
+}
+.plain-list {
+  list-style: none;
+  margin: 0 0 0.4rem;
+  padding: 0;
+}
+.plain-list li {
+  padding: 0.15rem 0;
+}
+.tool-line.subagent {
+  padding-left: 1rem;
+}
+.command-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.command-item {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+.command-item:hover,
+.command-item:focus-visible {
+  background: var(--accent-bg);
+}
+
+.panel-note {
+  margin: auto 0 0;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border);
+}

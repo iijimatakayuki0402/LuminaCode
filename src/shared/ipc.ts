@@ -15,6 +15,13 @@ import type {
   ChatEvent,
   ChatPrefs,
   ContextUsage,
+  CoworkProjectSettings,
+  FileEntry,
+  FilePreview,
+  McpServer,
+  McpServerSummary,
+  SkillsStatus,
+  SlashCommand,
   CoworkPrefs,
   EditAndResendInput,
   FileChange,
@@ -120,6 +127,22 @@ export interface IpcContract {
   /** Cowork: 常に許可（6.7: 設定画面から解除できる） */
   'cowork:getAlways': { args: [projectId: string, threadId?: string]; result: AlwaysAllowRules }
   'cowork:clearAlways': { args: [scope: 'thread' | 'project', id: string]; result: void }
+  /** Cowork: 作業フォルダのファイルツリーとプレビュー（COW-08。読み取り専用） */
+  'cowork:listDir': { args: [projectId: string, relPath: string]; result: FileEntry[] }
+  'cowork:preview': { args: [projectId: string, relPath: string]; result: FilePreview }
+  /** Cowork: 拡張（6.6） */
+  'cowork:commands': { args: [projectId: string]; result: SlashCommand[] }
+  'cowork:skills': { args: [projectId: string]; result: SkillsStatus }
+  'cowork:trustSkills': { args: [projectId: string, trust: boolean]; result: SkillsStatus }
+  'cowork:mcpList': { args: [projectId: string]; result: McpServerSummary[] }
+  /** 画面で信頼の確認を経てから呼ぶ */
+  'cowork:mcpUpsert': { args: [projectId: string, server: McpServer]; result: McpServerSummary[] }
+  'cowork:mcpRemove': { args: [projectId: string, name: string]; result: McpServerSummary[] }
+  'cowork:getSettings': { args: [projectId: string]; result: CoworkProjectSettings }
+  'cowork:setSettings': {
+    args: [projectId: string, input: Partial<CoworkProjectSettings>]
+    result: CoworkProjectSettings
+  }
   /** Cowork: コマンドの拒否リスト・許可リスト（SEC-22、SEC-23） */
   'cowork:getPrefs': { args: []; result: CoworkPrefs }
   'cowork:setPrefs': { args: [input: Partial<CoworkPrefs>]; result: CoworkPrefs }
@@ -274,6 +297,16 @@ export interface LuminaApi {
     clearAlways: Invoke<'cowork:clearAlways'>
     getPrefs: Invoke<'cowork:getPrefs'>
     setPrefs: Invoke<'cowork:setPrefs'>
+    listDir: Invoke<'cowork:listDir'>
+    preview: Invoke<'cowork:preview'>
+    commands: Invoke<'cowork:commands'>
+    skills: Invoke<'cowork:skills'>
+    trustSkills: Invoke<'cowork:trustSkills'>
+    mcpList: Invoke<'cowork:mcpList'>
+    mcpUpsert: Invoke<'cowork:mcpUpsert'>
+    mcpRemove: Invoke<'cowork:mcpRemove'>
+    getSettings: Invoke<'cowork:getSettings'>
+    setSettings: Invoke<'cowork:setSettings'>
   }
   usage: {
     status: Invoke<'usage:status'>

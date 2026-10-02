@@ -154,6 +154,7 @@ export const ja = {
         ? 'メッセージを入力（Enter で送信、Shift+Enter で改行）'
         : 'メッセージを入力（Ctrl+Enter で送信、Enter で改行）',
     send: '送信',
+    commands: 'スラッシュコマンド',
     stop: '停止',
     attach: 'ファイルを添付',
     dropHere: 'ここにドロップして添付',
@@ -202,6 +203,7 @@ export const ja = {
       command: 'コマンド',
       plan: '計画',
       web: 'Web',
+      mcp: 'MCP',
       other: 'その他'
     },
     method: {
@@ -390,6 +392,45 @@ export const ja = {
     done: (path: string) => `バックアップしました: ${path}`,
     folder: (path: string) => `保存先: ${path}`,
     none: 'まだバックアップはありません。'
+  },
+  panel: {
+    label: '作業フォルダと拡張',
+    tabs: { files: 'ファイル', extensions: '拡張' },
+    readOnly: '読み取り専用',
+    refresh: '更新',
+    linkNote: 'リンク（作業フォルダの外を指すことがあるため開きません）',
+    truncated: '大きいファイルのため、先頭だけを表示しています。',
+    unsupported: (size: string) => `このファイルはプレビューできません（${size}）。`,
+    web: 'Web アクセス',
+    webToggle: 'Web 検索・Web 取得を使えるようにする',
+    webNote:
+      'オンにしても、使うたびに確認します。取得先に情報が送られる場合があるため、必要なときだけオンにしてください。',
+    skills: 'スキル（.claude\\skills）',
+    noSkills: '作業フォルダにスキルはありません。',
+    skillsTrusted: '有効にしています。',
+    enableSkills: 'スキルを有効にする',
+    disable: '無効にする',
+    trustTitle: 'スキルを有効にしますか？',
+    trustMessage:
+      '作業フォルダのスキルを Claude に読み込ませます。内容を信頼できる場合だけ有効にしてください（スキルが行う操作も、これまでどおり確認の対象です）。内容が変わると、再び確認します。',
+    mcp: 'MCP サーバー',
+    noMcp: '設定されていません。',
+    addMcp: 'MCP サーバーを追加',
+    remove: '削除',
+    mcpTypes: { stdio: 'コマンドで起動（stdio）', http: 'HTTP' },
+    mcpName: '名前（英小文字・数字・ハイフン）',
+    mcpCommand: '起動するコマンド',
+    mcpArgs: '引数（空白区切り）',
+    mcpEnv: '環境変数（KEY=value を 1 行ずつ）',
+    mcpHeaders: 'HTTP ヘッダー（KEY=value を 1 行ずつ）',
+    mcpSecretNote: '値は暗号化して保存し、画面には表示しません。',
+    mcpTrustTitle: 'この MCP サーバーを信頼しますか？',
+    mcpTrustStdio:
+      '次のコマンドが、Cowork の実行のたびにこのパソコンで起動されます。内容を確認し、信頼できる場合だけ追加してください。',
+    mcpTrustHttp:
+      '次のサーバーに、Cowork から MCP のツールの呼び出しが送られます。信頼できる場合だけ追加してください。',
+    mcpTrustConfirm: '信頼して追加する',
+    subagent: 'サブエージェント'
   },
   appearance: {
     section: '表示',

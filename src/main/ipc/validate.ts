@@ -10,7 +10,9 @@ import type {
   Appearance,
   ChatPrefs,
   CoworkPrefs,
+  CoworkProjectSettings,
   CreateProjectInput,
+  McpServer,
   EditAndResendInput,
   ListProjectsOptions,
   CreateThreadInput,
@@ -191,6 +193,42 @@ export const searchQuery = object<SearchQuery>({
   text: str,
   projectId: optional(id),
   projectType: optional(oneOf<ProjectType>(['chat', 'cowork']))
+})
+
+const record = (name: string, value: unknown): Record<string, string> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return fail(name, 'オブジェクト')
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 50) return fail(name, '50 件以内')
+  return Object.fromEntries(entries.map(([k, v]) => [k, str(v, `${name}.${k}`)]))
+}
+
+export const mcpServer: Check<McpServer> = (value, name) => {
+  if (typeof value !== 'object' || value === null) return fail(name, 'オブジェクト')
+  const v = value as Record<string, unknown>
+  if (v['type'] === 'stdio') {
+    return {
+      name: str(v['name'], `${name}.name`),
+      type: 'stdio',
+      command: str(v['command'], `${name}.command`),
+      args: array(str, 50)(v['args'] ?? [], `${name}.args`),
+      env: record(`${name}.env`, v['env'] ?? {})
+    }
+  }
+  if (v['type'] === 'http') {
+    return {
+      name: str(v['name'], `${name}.name`),
+      type: 'http',
+      url: str(v['url'], `${name}.url`),
+      headers: record(`${name}.headers`, v['headers'] ?? {})
+    }
+  }
+  return fail(`${name}.type`, 'stdio / http のいずれか')
+}
+
+export const coworkSettingsInput = object<Partial<CoworkProjectSettings>>({
+  webAccess: optional(bool)
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

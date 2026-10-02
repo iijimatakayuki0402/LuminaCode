@@ -2,7 +2,7 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, Notification, safeStorage, shell } from 'electron'
 import { CHAT_EVENT_CHANNEL } from '@shared/ipc'
 import type { ChatEvent } from '@shared/types'
 import { createAnthropicClient } from './api/client'
@@ -11,6 +11,9 @@ import { ChatService } from './chat/chatService'
 import { TitleGenerator } from './chat/titleGenerator'
 import { getGlobalInstructions } from './settings/instructions'
 import { CoworkService } from './cowork/coworkService'
+import { McpStore } from './cowork/mcpStore'
+import { notificationFor } from './notify'
+import { getProject, getThread } from './db/operations'
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
 import { runDailyBackup } from './data/backup'
@@ -23,6 +26,9 @@ import { registerIpcHandlers } from './ipc/register'
 import { ModelService } from './models/modelService'
 import { ApiKeyStore } from './secrets/apiKeyStore'
 import { isTrustedSenderUrl, type TrustedOrigin } from './security/ipcSender'
+
+// COW-07: Windows のトースト通知に必要
+app.setAppUserModelId('com.tiijima.lumina-code')
 
 // 要件 5.3: データ保存先を %APPDATA%\LuminaCode\ に固定する（既定はパッケージ名で決まるため明示する）
 // userData を参照する処理（DB 等）より前、ready 前に設定する必要がある
@@ -132,9 +138,33 @@ function setupBackend(): boolean {
   // USG-05: 単価表は %APPDATA%\LuminaCode\pricing.json で更新できる
   const usage = new UsageService(db, join(app.getPath('userData'), 'pricing.json'))
 
+  // COW-07: アプリが非アクティブのとき、Cowork の完了・エラー・確認待ちをトースト通知で知らせる
+  const notifyIfInactive = (event: ChatEvent): void => {
+    if (!Notification.isSupported()) return
+    if (BrowserWindow.getAllWindows().some((w) => w.isFocused())) return
+    const content = notificationFor(event, (threadId) => {
+      const thread = getThread(db, threadId)
+      const project = thread ? getProject(db, thread.project_id) : null
+      return thread && project
+        ? { projectName: project.name, threadTitle: thread.title, projectType: project.type }
+        : null
+    })
+    if (!content) return
+    const notification = new Notification(content)
+    notification.on('click', () => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (!win) return
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    })
+    notification.show()
+  }
   const emitToAll = (event: ChatEvent): void => {
     for (const win of BrowserWindow.getAllWindows()) win.webContents.send(CHAT_EVENT_CHANNEL, event)
+    notifyIfInactive(event)
   }
+  // 6.6: プロジェクトの MCP サーバー（設定は暗号化して保存する）
+  const mcp = new McpStore(db, safeStorage)
   // THR-03: スレッドのタイトルを自動生成する
   const titles = new TitleGenerator({
     db,
@@ -163,6 +193,8 @@ function setupBackend(): boolean {
   coworkService = new CoworkService({
     db,
     usage,
+    mcp,
+    pluginsRoot: join(app.getPath('userData'), 'agent', 'plugins'),
     titles,
     getGlobalInstructions: globalInstructions,
     snapshotsDir: getSnapshotsDir(),
@@ -198,6 +230,7 @@ function setupBackend(): boolean {
       chatService,
       coworkService,
       usage,
+      mcp,
       attachments,
       saveFile: async (defaultName, content) => {
         const owner = BrowserWindow.getFocusedWindow()

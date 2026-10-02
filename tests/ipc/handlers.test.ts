@@ -16,6 +16,7 @@ import { invokeHandler } from '../../src/main/ipc/register'
 import { AttachmentStore } from '../../src/main/chat/attachments'
 import { ChatService } from '../../src/main/chat/chatService'
 import { CoworkService } from '../../src/main/cowork/coworkService'
+import { McpStore } from '../../src/main/cowork/mcpStore'
 import { ModelService } from '../../src/main/models/modelService'
 import { UsageService } from '../../src/main/usage/usageService'
 import { ApiKeyStore, type SecretCipher } from '../../src/main/secrets/apiKeyStore'
@@ -98,6 +99,7 @@ beforeEach(() => {
     chatService,
     coworkService,
     usage: new UsageService(db, join(dir, 'pricing.json')),
+    mcp: new McpStore(db, cipher),
     saveFile: async (name, content) => {
       saved = { name, content }
       return join(dir, name)

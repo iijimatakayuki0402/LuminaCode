@@ -62,6 +62,8 @@ export function insertToolEvent(
     method: PermissionMethod
     /** 拒否した場合は理由をそのまま結果にする */
     result?: string | null
+    /** サブエージェントの実行なら、その ID */
+    agentId?: string | null
   }
 ): ToolEventInfo {
   const event: ToolEventInfo = {
@@ -76,13 +78,14 @@ export function insertToolEvent(
     result: input.result ?? null,
     permission_method: input.method,
     created_at: Date.now(),
-    finished_at: input.method === 'denied' ? Date.now() : null
+    finished_at: input.method === 'denied' ? Date.now() : null,
+    agent_id: input.agentId ?? null
   }
   db.prepare(
     `INSERT INTO tool_events (id, thread_id, message_id, tool_use_id, tool_name, category, target,
-       command, result, permission_method, created_at, finished_at)
+       command, result, permission_method, created_at, finished_at, agent_id)
      VALUES (@id, @thread_id, @message_id, @tool_use_id, @tool_name, @category, @target, @command,
-       @result, @permission_method, @created_at, @finished_at)`
+       @result, @permission_method, @created_at, @finished_at, @agent_id)`
   ).run(event)
   return event
 }

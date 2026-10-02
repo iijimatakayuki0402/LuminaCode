@@ -296,6 +296,11 @@ export const MIGRATIONS: Migration[] = [
       "INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')",
       'CREATE INDEX IF NOT EXISTS idx_attachments_filename ON attachments(filename)'
     ]
+  },
+  {
+    // Cowork のサブエージェント（6.6: 進捗を入れ子で表示する）
+    version: 7,
+    statements: ['ALTER TABLE tool_events ADD COLUMN agent_id TEXT']
   }
 ]
 

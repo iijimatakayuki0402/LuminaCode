@@ -92,7 +92,17 @@ const api: LuminaApi = {
     getAlways: invoke('cowork:getAlways'),
     clearAlways: invoke('cowork:clearAlways'),
     getPrefs: invoke('cowork:getPrefs'),
-    setPrefs: invoke('cowork:setPrefs')
+    setPrefs: invoke('cowork:setPrefs'),
+    listDir: invoke('cowork:listDir'),
+    preview: invoke('cowork:preview'),
+    commands: invoke('cowork:commands'),
+    skills: invoke('cowork:skills'),
+    trustSkills: invoke('cowork:trustSkills'),
+    mcpList: invoke('cowork:mcpList'),
+    mcpUpsert: invoke('cowork:mcpUpsert'),
+    mcpRemove: invoke('cowork:mcpRemove'),
+    getSettings: invoke('cowork:getSettings'),
+    setSettings: invoke('cowork:setSettings')
   },
   usage: {
     status: invoke('usage:status'),

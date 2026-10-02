@@ -228,7 +228,8 @@ export type ChatEvent =
 // ========================================
 
 /** ツールの種別（権限判定と操作ログの絞り込みに使う） */
-export type ToolCategory = 'read' | 'write' | 'delete' | 'command' | 'plan' | 'web' | 'other'
+export type ToolCategory =
+  'read' | 'write' | 'delete' | 'command' | 'plan' | 'web' | 'mcp' | 'other'
 
 export type PermissionMethod =
   'auto' | 'allowed_once' | 'allowed_always_thread' | 'allowed_always_project' | 'denied'
@@ -249,6 +250,8 @@ export interface ToolEventInfo {
   permission_method: PermissionMethod
   created_at: number
   finished_at: number | null
+  /** サブエージェントの実行なら、その ID（6.6） */
+  agent_id: string | null
 }
 
 export interface PermissionTarget {
@@ -332,6 +335,70 @@ export interface ToolEventRow extends ToolEventInfo {
   project_id: string
   project_name: string
   thread_title: string | null
+}
+
+/** 作業フォルダのファイル（COW-08） */
+export interface FileEntry {
+  name: string
+  /** 作業フォルダからの相対パス */
+  path: string
+  isDir: boolean
+  /** リンク（作業フォルダ外を指すことがあるため、たどらない） */
+  isLink: boolean
+  size_bytes: number
+  modified_at: number
+}
+
+export interface FilePreview {
+  path: string
+  kind: 'text' | 'image' | 'unsupported'
+  text?: string
+  dataUrl?: string
+  size_bytes: number
+  /** 大きいため先頭だけを表示している */
+  truncated: boolean
+}
+
+/** 作業フォルダのスラッシュコマンド（6.6: .claude\commands\*.md） */
+export interface SlashCommand {
+  name: string
+  description: string | null
+  /** 本文（$ARGUMENTS を引数に置き換えて使う） */
+  content: string
+}
+
+/** 作業フォルダのスキル（6.6: .claude\skills\<名前>\SKILL.md） */
+export interface SkillInfo {
+  name: string
+  description: string | null
+}
+
+export interface SkillsStatus {
+  skills: SkillInfo[]
+  /** 現在の内容を信頼して有効にしているか（内容が変わると false に戻る） */
+  trusted: boolean
+}
+
+/** MCP サーバー（6.6: プロジェクト単位で設定する） */
+export type McpServer =
+  | {
+      name: string
+      type: 'stdio'
+      command: string
+      args: string[]
+      /** 値は暗号化して保存する。画面にはキーだけを表示する */
+      env: Record<string, string>
+    }
+  | { name: string; type: 'http'; url: string; headers: Record<string, string> }
+
+/** 画面に表示する MCP サーバー（秘密の値は含めない） */
+export type McpServerSummary =
+  | { name: string; type: 'stdio'; command: string; args: string[]; envKeys: string[] }
+  | { name: string; type: 'http'; url: string; headerKeys: string[] }
+
+export interface CoworkProjectSettings {
+  /** Web 検索・Web 取得を使えるようにする（6.6: 既定はオフ） */
+  webAccess: boolean
 }
 
 export interface CoworkPrefs {

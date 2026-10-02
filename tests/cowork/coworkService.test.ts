@@ -16,6 +16,7 @@ import type { ChatEvent, PermissionRequest, PermissionResponse } from '../../src
 import { CoworkService } from '../../src/main/cowork/coworkService'
 import { DELETE_TOOL } from '../../src/main/cowork/policy'
 import { listTrash } from '../../src/main/cowork/trash'
+import { setCoworkSettings, setSkillsTrust } from '../../src/main/cowork/extensions'
 import { createInMemoryDatabase } from '../../src/main/db/init'
 import * as ops from '../../src/main/db/operations'
 import { ModelService } from '../../src/main/models/modelService'
@@ -112,7 +113,9 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
       model: 'claude-sonnet-test',
       settingSources: [],
       permissionMode: 'default',
-      disallowedTools: ['WebSearch', 'WebFetch']
+      disallowedTools: ['WebSearch', 'WebFetch'],
+      // Claude Code の組み込みのスキルも使わない
+      skills: []
     })
     expect(options.tools).not.toContain('WebFetch')
   })
@@ -432,5 +435,42 @@ describe('中断と再開（COW-06、CHT-14）', () => {
       .prepare('SELECT input_tokens FROM usage_records ORDER BY created_at, rowid')
       .all() as { input_tokens: number }[]
     expect(rows.map((r) => r.input_tokens)).toEqual([1000, 1000, 1000])
+  })
+
+  it('Web・スキル・MCP の設定を実行に渡し、サブエージェントの実行を記録する（6.6）', async () => {
+    setCoworkSettings(db, projectId, { webAccess: true })
+    mkdirSync(join(work, '.claude', 'skills', 'report'), { recursive: true })
+    writeFileSync(
+      join(work, '.claude', 'skills', 'report', 'SKILL.md'),
+      ['---', 'name: report', '---', '手順'].join('\n')
+    )
+    setSkillsTrust(db, projectId, work, true)
+    fake = fakeAgentSdk([
+      { calls: [{ tool: 'Read', input: { file_path: 'a.txt' }, agentId: 'sub-1' }], text: 'ok' }
+    ])
+    service = new CoworkService({
+      db,
+      snapshotsDir: join(base, 'snapshots'),
+      modelService: new ModelService(db, () => null),
+      getApiKey: () => 'sk-test',
+      configDir: join(base, 'agent'),
+      loadSdk: fake.loadSdk,
+      pluginsRoot: join(base, 'plugins'),
+      mcp: {
+        toSdkConfig: () => ({ github: { type: 'stdio', command: 'npx', args: [], env: {} } })
+      },
+      emit: (e) => events.push(e)
+    })
+    await send()
+
+    const { options } = fake.runs[0]
+    expect(options.tools).toEqual(expect.arrayContaining(['WebSearch', 'WebFetch', 'Skill']))
+    expect(options.disallowedTools).toEqual([])
+    expect(options.plugins).toEqual([
+      { type: 'local', path: join(base, 'plugins', projectId), skipMcpDiscovery: true }
+    ])
+    expect(options.skills).toEqual(['lumina-project:report'])
+    expect(Object.keys(options.mcpServers ?? {}).sort()).toEqual(['github', 'lumina'])
+    expect(service.listToolEvents(threadId)[0].agent_id).toBe('sub-1')
   })
 })

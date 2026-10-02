@@ -31,6 +31,15 @@ import {
 } from '../data/projectBundle'
 import { randomUUID } from 'node:crypto'
 import { listTrash, purgeTrash, restoreFromTrash } from '../cowork/trash'
+import { listDir, readPreview } from '../cowork/files'
+import {
+  getCoworkSettings,
+  listSlashCommands,
+  setCoworkSettings,
+  setSkillsTrust,
+  skillsStatus
+} from '../cowork/extensions'
+import type { McpStore } from '../cowork/mcpStore'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
 import type { AttachmentInfo, StageResult } from '@shared/types'
 import { NotFoundError } from './errors'
@@ -54,6 +63,7 @@ export interface HandlerDeps {
   chatService: ChatService
   coworkService: CoworkService
   usage: UsageService
+  mcp: McpStore
   attachments: AttachmentStore
   /** 保存ダイアログで保存先を選び、内容を書き込む（キャンセル時は null） */
   saveFile: (defaultName: string, content: string) => Promise<string | null>
@@ -102,6 +112,7 @@ export function createHandlers({
   chatService,
   coworkService,
   usage,
+  mcp,
   attachments,
   saveFile,
   openTextFile,
@@ -271,6 +282,44 @@ export function createHandlers({
       ),
     'cowork:clearAlways': (scope, id) =>
       coworkService.clearAlways(v.scope(scope, 'scope'), v.id(id, 'id')),
+    'cowork:listDir': (projectId, relPath) =>
+      listDir(workFolderOf(v.id(projectId, 'projectId')), v.str(relPath, 'relPath')),
+    'cowork:preview': (projectId, relPath) =>
+      readPreview(workFolderOf(v.id(projectId, 'projectId')), v.str(relPath, 'relPath')),
+    'cowork:commands': (projectId) => listSlashCommands(workFolderOf(v.id(projectId, 'projectId'))),
+    'cowork:skills': (projectId) => {
+      const id = v.id(projectId, 'projectId')
+      return skillsStatus(db, id, workFolderOf(id))
+    },
+    'cowork:trustSkills': (projectId, trust) => {
+      const id = v.id(projectId, 'projectId')
+      return setSkillsTrust(db, id, workFolderOf(id), v.bool(trust, 'trust'))
+    },
+    'cowork:mcpList': (projectId) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return mcp.summaries(id)
+    },
+    'cowork:mcpUpsert': (projectId, server) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return mcp.upsert(id, v.mcpServer(server, 'server'))
+    },
+    'cowork:mcpRemove': (projectId, name) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return mcp.remove(id, v.str(name, 'name'))
+    },
+    'cowork:getSettings': (projectId) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return getCoworkSettings(db, id)
+    },
+    'cowork:setSettings': (projectId, input) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return setCoworkSettings(db, id, v.coworkSettingsInput(input, 'input'))
+    },
     'cowork:getPrefs': () => coworkService.getPrefs(),
     'cowork:setPrefs': (input) => coworkService.setPrefs(v.coworkPrefsInput(input, 'input')),
 

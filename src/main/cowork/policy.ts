@@ -33,7 +33,16 @@ const WRITE_TOOLS: Record<string, string> = {
 }
 const COMMAND_TOOLS = new Set(['Bash', 'PowerShell'])
 // 実行の補助（ファイルやコマンドに触れない）
-const SAFE_TOOLS = new Set(['TodoWrite', 'Agent', 'Task', 'BashOutput', 'KillShell', 'KillBash'])
+// Skill は信頼済みのスキルの読み込みのみ（スキルが行う操作はそれぞれのツールとして判定される）
+const SAFE_TOOLS = new Set([
+  'TodoWrite',
+  'Agent',
+  'Task',
+  'BashOutput',
+  'KillShell',
+  'KillBash',
+  'Skill'
+])
 const PLAN_TOOLS = new Set(['ExitPlanMode', 'EnterPlanMode'])
 
 const str = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
@@ -48,11 +57,18 @@ function protectedReason(workRoot: string, target: string): string | undefined {
 /**
  * ツール呼び出しを分類し、対象のパスが作業フォルダ内かを確かめる
  */
-export function classifyTool(toolName: string, input: unknown, workRoot: string): Classified {
+export function classifyTool(
+  toolName: string,
+  input: unknown,
+  workRoot: string,
+  /** 読み取りだけを許すフォルダ（信頼済みのスキルのコピー）。書き込み・削除には使わない */
+  readRoots: string[] = []
+): Classified {
   const args = (input ?? {}) as Record<string, unknown>
   const check = (category: ToolCategory, rawPaths: (string | undefined)[]): Classified => {
     const paths = rawPaths.filter((p): p is string => !!p).map((p) => resolve(workRoot, p))
-    const outside = paths.filter((p) => !isInsideWorkFolder(workRoot, p))
+    const roots = category === 'read' ? [workRoot, ...readRoots] : [workRoot]
+    const outside = paths.filter((p) => !roots.some((root) => isInsideWorkFolder(root, p)))
     const danger = paths.map((p) => protectedReason(workRoot, p)).find(Boolean)
     return { category, paths, outside, ...(danger ? { danger } : {}) }
   }
@@ -77,7 +93,18 @@ export function classifyTool(toolName: string, input: unknown, workRoot: string)
   if (SAFE_TOOLS.has(toolName)) return { category: 'other', paths: [], outside: [] }
   if (PLAN_TOOLS.has(toolName)) return { category: 'plan', paths: [], outside: [] }
   if (toolName === 'WebSearch' || toolName === 'WebFetch') {
-    return { category: 'web', paths: [], outside: [], unsupported: 'Web へのアクセスは無効です' }
+    // 対象（URL・検索語）はコマンドの欄で示す
+    const target = str(args['url']) ?? str(args['query']) ?? ''
+    return { category: 'web', paths: [], outside: [], command: target }
+  }
+  // プロジェクトで設定した MCP サーバーのツール（6.6）
+  if (toolName.startsWith('mcp__')) {
+    return {
+      category: 'mcp',
+      paths: [],
+      outside: [],
+      command: JSON.stringify(input ?? {}).slice(0, 2000)
+    }
   }
   return {
     category: 'other',
@@ -112,9 +139,9 @@ export const DEFAULT_COMMAND_DENY_PATTERNS: string[] = [
 const DELETE_COMMAND = String.raw`(^|[\s;&|(])(rm|rmdir|del|erase|rd|Remove-Item|ri|unlink|shred)(\s|$)`
 
 /** 作業フォルダ外の絶対パスを明示しているか（SEC-22） */
-function referencesOutside(command: string, workRoot: string): string | undefined {
+function referencesOutside(command: string, roots: string[]): string | undefined {
   const candidates = command.match(/(?:[A-Za-z]:[\\/][^\s"'`|;&<>]*|\\\\[^\s"'`|;&<>]+)/g) ?? []
-  return candidates.find((p) => !isInsideWorkFolder(workRoot, p))
+  return candidates.find((p) => !roots.some((root) => isInsideWorkFolder(root, p)))
 }
 
 export interface CommandRules {
@@ -129,7 +156,13 @@ export type CommandCheck =
   | { verdict: 'allowlisted' }
   | { verdict: 'ask' }
 
-export function checkCommand(command: string, workRoot: string, rules: CommandRules): CommandCheck {
+export function checkCommand(
+  command: string,
+  workRoot: string,
+  rules: CommandRules,
+  /** パスの指定を認めるフォルダ（信頼済みのスキルのコピー。実行は確認を経る） */
+  extraRoots: string[] = []
+): CommandCheck {
   const text = command.trim()
   for (const pattern of rules.denyPatterns) {
     let re: RegExp
@@ -140,7 +173,7 @@ export function checkCommand(command: string, workRoot: string, rules: CommandRu
     }
     if (re.test(text)) return { verdict: 'deny', reason: '拒否リストに一致するコマンドです' }
   }
-  const outside = referencesOutside(text, workRoot)
+  const outside = referencesOutside(text, [workRoot, ...extraRoots])
   if (outside)
     return { verdict: 'deny', reason: `作業フォルダ外のパスを含むコマンドです: ${outside}` }
   if (new RegExp(DELETE_COMMAND, 'i').test(text)) return { verdict: 'delete' }
@@ -179,14 +212,36 @@ export interface DecideContext {
   workRoot: string
   /** 削除対象にフォルダを含むか（SEC-13） */
   includesFolder?: boolean
+  /** Web 検索・Web 取得を使えるか（6.6: 既定はオフ） */
+  webAccess?: boolean
+  /** 信頼済みのスキルのコピー（コマンドでのパスの指定を認める） */
+  extraRoots?: string[]
 }
 
 export function decide(c: Classified, ctx: DecideContext): Decision {
   if (c.unsupported) return { action: 'deny', reason: c.unsupported }
+  if (c.category === 'web' && !ctx.webAccess) {
+    return {
+      action: 'deny',
+      reason: 'Web へのアクセスは無効です（プロジェクトの設定でオンにできます）。'
+    }
+  }
   if (c.outside.length > 0) {
     return { action: 'deny', reason: `作業フォルダの外へのアクセスは拒否しました: ${c.outside[0]}` }
   }
   if (c.category === 'read' || c.category === 'other') return { action: 'allow', method: 'auto' }
+  // Web・MCP は外部とやり取りするため、どのモードでも確認する（計画のみでも調べものには使える）
+  if (c.category === 'web' || c.category === 'mcp') {
+    if (ctx.mode === 'plan_only' && c.category === 'mcp') {
+      return { action: 'deny', reason: '計画のみモードのため、MCP のツールは使えません。' }
+    }
+    const scope = ctx.always.thread.includes(c.category)
+      ? 'allowed_always_thread'
+      : ctx.always.project.includes(c.category)
+        ? 'allowed_always_project'
+        : null
+    return scope ? { action: 'allow', method: scope } : { action: 'ask', offerAlways: true }
+  }
 
   // 計画のみ: 変更は一切行わない。計画の提示（ExitPlanMode）は、本文での提示に切り替えさせる
   if (ctx.mode === 'plan_only') {
@@ -201,7 +256,7 @@ export function decide(c: Classified, ctx: DecideContext): Decision {
 
   const category = c.category
   if (category === 'command') {
-    const result = checkCommand(c.command ?? '', ctx.workRoot, ctx.commandRules)
+    const result = checkCommand(c.command ?? '', ctx.workRoot, ctx.commandRules, ctx.extraRoots)
     if (result.verdict === 'deny') return { action: 'deny', reason: result.reason }
     if (result.verdict === 'delete') {
       return {
