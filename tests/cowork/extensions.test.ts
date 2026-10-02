@@ -273,6 +273,16 @@ describe('トースト通知（COW-07）', () => {
     ).toBeNull()
   })
 
+  it('タイトルが無い（最初の発言から作ったタイトルを含む）場合はプロジェクト名だけを出す', () => {
+    expect(
+      notificationFor(finished('complete'), () => ({
+        projectName: '整理',
+        threadTitle: null,
+        projectType: 'cowork'
+      }))
+    ).toEqual({ title: '作業が完了しました', body: '整理' })
+  })
+
   it('通常チャットは通知しない', () => {
     expect(
       notificationFor(finished('complete'), () => ({

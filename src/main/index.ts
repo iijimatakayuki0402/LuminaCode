@@ -203,7 +203,12 @@ function setupBackend(): boolean {
       const thread = getThread(db, threadId)
       const project = thread ? getProject(db, thread.project_id) : null
       return thread && project
-        ? { projectName: project.name, threadTitle: thread.title, projectType: project.type }
+        ? {
+            projectName: project.name,
+            // 最初の発言から作ったタイトルは会話の内容そのものなので、通知には出さない
+            threadTitle: thread.title_source === 'auto' ? null : thread.title,
+            projectType: project.type
+          }
         : null
     })
     if (!content) return
