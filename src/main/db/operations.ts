@@ -5,14 +5,22 @@
 
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
+import type {
+  CreateProjectInput,
+  CreateThreadInput,
+  Message,
+  MessageRole,
+  PermissionMode,
+  Project,
+  ProjectType,
+  Thread,
+  UpdateProjectInput,
+  UpdateThreadInput
+} from '@shared/types'
 
 // ========================================
 // 型定義
 // ========================================
-
-export type ProjectType = 'chat' | 'cowork'
-export type PermissionMode = 'confirm_each' | 'auto_edit' | 'plan_only'
-export type MessageRole = 'user' | 'assistant'
 
 // SQLiteの行型定義（列挙値は CHECK 制約で保証される）
 interface ProjectRow {
@@ -49,48 +57,6 @@ interface MessageRow {
   tokens_used: number | null
   estimated_cost: number | null
   created_at: number
-}
-
-export interface Project {
-  id: string
-  type: ProjectType
-  name: string
-  custom_instructions: string | null
-  work_folder: string | null
-  model: string | null
-  permission_mode: PermissionMode
-  pinned: boolean
-  archived: boolean
-  created_at: number
-  updated_at: number
-}
-
-export interface Thread {
-  id: string
-  project_id: string
-  title: string | null
-  model: string | null
-  extended_thinking: boolean
-  last_opened_at: number | null
-  created_at: number
-  updated_at: number
-}
-
-export interface Message {
-  id: string
-  thread_id: string
-  parent_id: string | null
-  role: MessageRole
-  content: string
-  tokens_used: number | null
-  estimated_cost: number | null
-  created_at: number
-}
-
-export interface Setting {
-  key: string
-  value: string
-  updated_at: number
 }
 
 // ========================================
@@ -169,15 +135,6 @@ function validateProject(project: {
 // Project操作
 // ========================================
 
-export interface CreateProjectInput {
-  type: ProjectType
-  name: string
-  custom_instructions?: string
-  work_folder?: string
-  model?: string
-  permission_mode?: PermissionMode
-}
-
 export function createProject(db: Database.Database, input: CreateProjectInput): Project {
   const now = Date.now()
   const id = randomUUID()
@@ -218,16 +175,6 @@ export function getProject(db: Database.Database, id: string): Project | null {
   const row = stmt.get(id) as ProjectRow | undefined
 
   return row ? toProject(row) : null
-}
-
-export interface UpdateProjectInput {
-  name?: string
-  custom_instructions?: string
-  work_folder?: string
-  model?: string
-  permission_mode?: PermissionMode
-  pinned?: boolean
-  archived?: boolean
 }
 
 export function updateProject(
@@ -314,13 +261,6 @@ export function listProjects(db: Database.Database): Project[] {
 // Thread操作
 // ========================================
 
-export interface CreateThreadInput {
-  project_id: string
-  title?: string
-  model?: string
-  extended_thinking?: boolean
-}
-
 export function createThread(db: Database.Database, input: CreateThreadInput): Thread {
   const now = Date.now()
   const id = randomUUID()
@@ -349,12 +289,6 @@ export function getThread(db: Database.Database, id: string): Thread | null {
   const row = stmt.get(id) as ThreadRow | undefined
 
   return row ? toThread(row) : null
-}
-
-export interface UpdateThreadInput {
-  title?: string
-  model?: string
-  extended_thinking?: boolean
 }
 
 export function updateThread(

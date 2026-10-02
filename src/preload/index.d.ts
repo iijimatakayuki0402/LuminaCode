@@ -1,6 +1,4 @@
-export interface LuminaApi {
-  versions: { electron: string; chrome: string }
-}
+import type { LuminaApi } from '@shared/ipc'
 
 declare global {
   interface Window {
