@@ -105,6 +105,8 @@ function deleted(changed: boolean, message: string): void {
 const PROJECT_NOT_FOUND = 'プロジェクトが見つかりません。'
 const THREAD_NOT_FOUND = 'スレッドが見つかりません。'
 const API_KEY_NOT_CONFIGURED = 'API キーが設定されていません。'
+/** CMN-05: 最後に開いていたプロジェクト */
+const LAST_PROJECT_KEY = 'last_project_id'
 
 export function createHandlers({
   db,
@@ -158,6 +160,15 @@ export function createHandlers({
   return {
     'app:getInfo': () => appInfo,
     'app:licenses': () => readLicenses(),
+    'app:getLastProject': () => {
+      const projectId = ops.getSetting(db, LAST_PROJECT_KEY)
+      const project = projectId ? ops.getProject(db, projectId) : null
+      return project && !project.archived ? project : null
+    },
+    'app:setLastProject': (projectId) => {
+      if (projectId === null) ops.deleteSetting(db, LAST_PROJECT_KEY)
+      else ops.setSetting(db, LAST_PROJECT_KEY, v.id(projectId, 'projectId'))
+    },
 
     'update:getStatus': () => update.getStatus(),
     'update:check': () => update.check(),

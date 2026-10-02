@@ -177,6 +177,22 @@ describe('app', () => {
   it('アプリ情報を返す', async () => {
     expect(await value('app:getInfo')).toMatchObject({ version: '0.1.0', dataPath: 'C:\\data' })
   })
+
+  it('最後に開いていたプロジェクトを記録し、アーカイブ・削除済みなら返さない（CMN-05）', async () => {
+    expect(await value('app:getLastProject')).toBeNull()
+    const a = await value<Project>('projects:create', { type: 'chat', name: 'A' })
+    await value('app:setLastProject', a.id)
+    expect(await value<Project>('app:getLastProject')).toMatchObject({ id: a.id })
+
+    await value('projects:update', a.id, { archived: true })
+    expect(await value('app:getLastProject')).toBeNull()
+    await value('projects:update', a.id, { archived: false })
+    await value('projects:delete', a.id)
+    expect(await value('app:getLastProject')).toBeNull()
+
+    await value('app:setLastProject', null)
+    expect(await call('app:setLastProject', 42)).toMatchObject({ ok: false })
+  })
 })
 
 describe('projects', () => {

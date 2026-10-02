@@ -71,6 +71,10 @@ export interface IpcContract {
   'app:getInfo': { args: []; result: AppInfo }
   /** 同梱しているオープンソースのライセンス（6.12） */
   'app:licenses': { args: []; result: LicenseList }
+  /** 最後に開いていたプロジェクト（CMN-05）。削除・アーカイブ済みなら null */
+  'app:getLastProject': { args: []; result: Project | null }
+  /** プロジェクトを開いたとき／ダッシュボードに戻ったとき（null）に記録する */
+  'app:setLastProject': { args: [projectId: string | null]; result: void }
 
   /** 更新（CMN-03）。ダウンロード・インストールは、ユーザーの操作でのみ行う */
   'update:getStatus': { args: []; result: UpdateStatus }
@@ -243,6 +247,8 @@ export interface LuminaApi {
   app: {
     getInfo: Invoke<'app:getInfo'>
     licenses: Invoke<'app:licenses'>
+    getLastProject: Invoke<'app:getLastProject'>
+    setLastProject: Invoke<'app:setLastProject'>
   }
   update: {
     getStatus: Invoke<'update:getStatus'>

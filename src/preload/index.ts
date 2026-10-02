@@ -21,7 +21,9 @@ const invoke =
 const api: LuminaApi = {
   app: {
     getInfo: invoke('app:getInfo'),
-    licenses: invoke('app:licenses')
+    licenses: invoke('app:licenses'),
+    getLastProject: invoke('app:getLastProject'),
+    setLastProject: invoke('app:setLastProject')
   },
   update: {
     getStatus: invoke('update:getStatus'),

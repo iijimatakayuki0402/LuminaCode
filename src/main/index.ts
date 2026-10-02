@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, Notification, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, Notification, safeStorage, screen, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { CHAT_EVENT_CHANNEL, UPDATE_EVENT_CHANNEL } from '@shared/ipc'
 import type { ChatEvent, LicenseList } from '@shared/types'
@@ -14,7 +14,8 @@ import { getGlobalInstructions } from './settings/instructions'
 import { CoworkService } from './cowork/coworkService'
 import { McpStore } from './cowork/mcpStore'
 import { notificationFor } from './notify'
-import { getProject, getThread } from './db/operations'
+import { getProject, getSetting, getThread, setSetting } from './db/operations'
+import { parseWindowState, restoreBounds, WINDOW_STATE_KEY } from './windowState'
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
 import { runDailyBackup } from './data/backup'
@@ -48,9 +49,14 @@ const trustedOrigin: TrustedOrigin = {
 }
 
 function createWindow(): void {
+  // CMN-05: 前回の大きさ・位置で開く（モニターの構成が変わって画面外になる場合は中央に開く）
+  const db = getDatabase()
+  const saved = parseWindowState(getSetting(db, WINDOW_STATE_KEY))
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    ...restoreBounds(
+      saved,
+      screen.getAllDisplays().map((d) => d.workArea)
+    ),
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -61,7 +67,19 @@ function createWindow(): void {
     }
   })
 
-  win.on('ready-to-show', () => win.show())
+  win.on('ready-to-show', () => {
+    if (saved?.maximized) win.maximize()
+    win.show()
+  })
+  win.on('close', () => {
+    try {
+      // 最大化中は、元に戻したときの大きさを保存する
+      const state = { bounds: win.getNormalBounds(), maximized: win.isMaximized() }
+      setSetting(db, WINDOW_STATE_KEY, JSON.stringify(state))
+    } catch (error) {
+      console.warn('[window] failed to save the window state:', (error as Error).message)
+    }
+  })
 
   // 外部リンクは既定ブラウザで開く
   win.webContents.setWindowOpenHandler(({ url }) => {

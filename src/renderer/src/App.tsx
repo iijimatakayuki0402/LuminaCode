@@ -49,19 +49,34 @@ export default function App(): React.JSX.Element {
     settings: () => setScreen({ name: 'settings' })
   })
 
+  // CMN-05: 起動時の画面を決めるまでは、開いたプロジェクトを記録しない
+  const [restored, setRestored] = useState(false)
   useEffect(() => {
     Promise.all([
       unwrap(window.lumina.apiKey.getStatus()),
-      unwrap(window.lumina.settings.getAppearance())
+      unwrap(window.lumina.settings.getAppearance()),
+      unwrap(window.lumina.app.getLastProject())
     ])
-      .then(([s, a]) => {
+      .then(([s, a, last]) => {
         setStatus(s)
         setAppearance(a)
         // 要件 KEY-02: 初回（未設定）はセットアップ画面から始める
         if (!s.configured) setScreen({ name: 'setup' })
+        // CMN-05: 最後に開いていたプロジェクトを開く
+        else if (last) setScreen({ name: 'project', project: last })
+        setRestored(true)
       })
       .catch((e: unknown) => setError((e as Error).message))
   }, [])
+
+  // CMN-05: プロジェクトを開いたら記録し、ダッシュボードに戻ったら消す
+  const lastProjectId =
+    screen.name === 'project' ? screen.project.id : screen.name === 'dashboard' ? null : undefined
+  useEffect(() => {
+    if (restored && lastProjectId !== undefined) {
+      void window.lumina.app.setLastProject(lastProjectId)
+    }
+  }, [restored, lastProjectId])
 
   useEffect(() => applyAppearance(appearance), [appearance])
 
