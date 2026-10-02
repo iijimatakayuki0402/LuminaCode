@@ -7,11 +7,14 @@
 import { ACCENTS, MODES } from '@shared/theme'
 import type {
   Appearance,
+  ChatPrefs,
   CreateProjectInput,
+  EditAndResendInput,
   ListProjectsOptions,
   CreateThreadInput,
   PermissionMode,
   ProjectType,
+  SendMessageInput,
   UpdateProjectInput,
   UpdateThreadInput
 } from '@shared/types'
@@ -100,6 +103,37 @@ export const listProjectsOptions = object<ListProjectsOptions>({
 export const appearanceInput = object<Partial<Appearance>>({
   mode: optional(oneOf(MODES)),
   accent: optional(oneOf(ACCENTS))
+})
+
+const array =
+  <T>(check: Check<T>, max: number): Check<T[]> =>
+  (value, name) => {
+    if (!Array.isArray(value) || value.length > max) return fail(name, `${max} 件以内の配列`)
+    return value.map((item, i) => check(item, `${name}[${i}]`))
+  }
+
+const ids = array(id, 20)
+
+export const paths = array(str, 20)
+
+export const bytes: Check<Uint8Array> = (value, name) =>
+  value instanceof Uint8Array ? value : fail(name, 'バイト列')
+
+export const sendMessageInput = object<SendMessageInput>({
+  threadId: id,
+  content: str,
+  attachmentIds: ids
+})
+
+export const editAndResendInput = object<EditAndResendInput>({
+  userMessageId: id,
+  content: str,
+  keepAttachmentIds: ids,
+  attachmentIds: ids
+})
+
+export const chatPrefsInput = object<Partial<ChatPrefs>>({
+  sendKey: optional(oneOf(['enter', 'ctrl_enter'] as const))
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

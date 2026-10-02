@@ -209,6 +209,22 @@ export const MIGRATIONS: Migration[] = [
       CREATE_SETTINGS_TABLE,
       CREATE_SNAPSHOTS_TABLE
     ]
+  },
+  {
+    // 通常チャット（Stage 5）: 応答の状態と、API へそのまま送り返す内容ブロック
+    //   status:         streaming（生成中）/ complete / stopped（CHT-04）/ error / interrupted（異常終了。6.14）
+    //   content_blocks: 応答の内容ブロック（思考ブロックを含む JSON）。完了した応答のみ保持し、
+    //                   次のリクエストで変更せずに送り返す（思考ブロックは会話に結び付くため）
+    version: 2,
+    statements: [
+      `ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'
+         CHECK(status IN ('streaming', 'complete', 'stopped', 'error', 'interrupted'))`,
+      'ALTER TABLE messages ADD COLUMN content_blocks TEXT',
+      'ALTER TABLE messages ADD COLUMN model TEXT',
+      'ALTER TABLE messages ADD COLUMN stop_reason TEXT',
+      'ALTER TABLE messages ADD COLUMN error_kind TEXT',
+      'CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status)'
+    ]
   }
 ]
 

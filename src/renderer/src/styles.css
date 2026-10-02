@@ -495,3 +495,248 @@ dialog.dialog.danger .dialog-head {
     transition: none !important;
   }
 }
+
+/* 通常チャット（DSN-01: ロール名と時刻を付けたログ行。生成中は控えめなカーソル点滅） */
+.content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.thread-model {
+  max-width: 32rem;
+  margin-bottom: 0.5rem;
+}
+.chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.5rem 1rem;
+}
+.log-row {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.log-row:last-child {
+  border-bottom: none;
+}
+.log-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.log-role {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--fg);
+}
+.log-assistant .log-role {
+  color: var(--accent-text);
+}
+.log-body {
+  line-height: 1.7;
+  word-break: break-word;
+}
+.user-text {
+  white-space: pre-wrap;
+}
+.log-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+.cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: blink 1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.thinking {
+  border-left: 2px solid var(--border);
+  padding-left: 0.6rem;
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.thinking summary {
+  cursor: pointer;
+}
+.thinking-body {
+  white-space: pre-wrap;
+  margin-top: 0.35rem;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown table {
+  border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+}
+.markdown :not(pre) > code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0 0.25em;
+}
+.markdown a {
+  color: var(--accent-text);
+}
+.code-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0.6rem 0;
+  overflow: hidden;
+}
+.code-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.code-block pre {
+  margin: 0;
+  padding: 0.75rem;
+  overflow: auto;
+  background: var(--bg);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+/* シンタックスハイライト（highlight.js のクラス）。テーマ変数に追従する */
+:root {
+  --hl-keyword: #8a3ab9;
+  --hl-string: #2f7a2f;
+  --hl-number: #a3501a;
+  --hl-comment: #6a737d;
+  --hl-title: #1f5fa8;
+}
+:root[data-mode='dark'] {
+  --hl-keyword: #d2a8ff;
+  --hl-string: #8ddb8c;
+  --hl-number: #ffb07c;
+  --hl-comment: #8b949e;
+  --hl-title: #79c0ff;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-type {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-attr,
+.hljs-symbol,
+.hljs-template-tag {
+  color: var(--hl-string);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-variable {
+  color: var(--hl-number);
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.hljs-title,
+.hljs-function,
+.hljs-section,
+.hljs-name {
+  color: var(--hl-title);
+}
+.composer {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.composer.dragging {
+  border-color: var(--accent);
+}
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+.composer-input {
+  min-height: 4.5rem;
+  max-height: 14rem;
+}
+.chips {
+  list-style: none;
+  margin: 0.35rem 0;
+  padding: 0;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.2rem 0.4rem;
+  font-size: 0.8rem;
+  max-width: 20rem;
+}
+.chip-thumb {
+  width: 2rem;
+  height: 2rem;
+  object-fit: cover;
+  border-radius: 2px;
+}
+.chip-kind {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

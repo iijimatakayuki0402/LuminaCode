@@ -1,5 +1,13 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type { IpcArgs, IpcChannel, IpcResult, IpcReturn, LuminaApi } from '@shared/ipc'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import {
+  CHAT_EVENT_CHANNEL,
+  type IpcArgs,
+  type IpcChannel,
+  type IpcResult,
+  type IpcReturn,
+  type LuminaApi
+} from '@shared/ipc'
+import type { ChatEvent } from '@shared/types'
 
 // レンダラーに公開する API は、ここで最小限に定義する（API キーやファイルには直接触れさせない）
 // 汎用の invoke は公開せず、用途ごとの関数だけを渡す
@@ -48,6 +56,29 @@ const api: LuminaApi = {
   },
   dialog: {
     selectFolder: invoke('dialog:selectFolder')
+  },
+  chatPrefs: {
+    get: invoke('settings:getChatPrefs'),
+    set: invoke('settings:setChatPrefs')
+  },
+  chat: {
+    send: invoke('chat:send'),
+    regenerate: invoke('chat:regenerate'),
+    editAndResend: invoke('chat:editAndResend'),
+    stop: invoke('chat:stop'),
+    onEvent: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: ChatEvent): void =>
+        listener(payload)
+      ipcRenderer.on(CHAT_EVENT_CHANNEL, handler)
+      return () => ipcRenderer.removeListener(CHAT_EVENT_CHANNEL, handler)
+    }
+  },
+  attachments: {
+    select: invoke('attachments:select'),
+    stagePaths: invoke('attachments:stagePaths'),
+    stageData: invoke('attachments:stageData'),
+    discard: invoke('attachments:discard'),
+    pathForFile: (file) => webUtils.getPathForFile(file)
   }
 }
 

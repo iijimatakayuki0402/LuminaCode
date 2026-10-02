@@ -132,6 +132,44 @@ export const ja = {
     workFolder: '作業フォルダ',
     permissionMode: '権限モード'
   },
+  chat: {
+    user: 'USER',
+    assistant: 'CLAUDE',
+    copy: 'コピー',
+    copyCode: 'コピー',
+    copied: 'コピーしました',
+    edit: '編集',
+    resend: '再送信',
+    regenerate: '再生成',
+    placeholder: (sendKey: 'enter' | 'ctrl_enter') =>
+      sendKey === 'enter'
+        ? 'メッセージを入力（Enter で送信、Shift+Enter で改行）'
+        : 'メッセージを入力（Ctrl+Enter で送信、Enter で改行）',
+    send: '送信',
+    stop: '停止',
+    attach: 'ファイルを添付',
+    dropHere: 'ここにドロップして添付',
+    removeAttachment: (name: string) => `${name} を取り外す`,
+    thinking: '思考の要約',
+    thinkingNow: '考えています…',
+    streaming: '生成中…',
+    status: {
+      stopped: '停止しました（ここまでの応答を保持しています）',
+      error: 'エラーで中断しました',
+      interrupted: 'アプリの終了により中断しました（ここまでの応答を保持しています）'
+    },
+    refusal: 'この依頼への回答は控えられました。',
+    maxTokens: '出力の上限に達したため、途中で終わっています。',
+    retrying: (attempt: number, max: number, seconds: number) =>
+      `再試行を待っています（${attempt}/${max} 回目、約 ${seconds} 秒後）`,
+    offline: 'オフラインです。接続が回復すると送信できます。',
+    empty: '最初のメッセージを送信してください。',
+    tokens: (n: number) => `${n.toLocaleString()} tokens`,
+    cost: (usd: number) => `約 $${usd.toFixed(4)}`,
+    coworkComingSoon: 'Cowork の実行は次の段階で実装します。',
+    sendKey: '送信キー',
+    sendKeys: { enter: 'Enter で送信', ctrl_enter: 'Ctrl+Enter で送信' }
+  },
   appearance: {
     section: '表示',
     mode: '表示モード',

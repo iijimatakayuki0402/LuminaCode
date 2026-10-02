@@ -32,7 +32,8 @@ export async function fetchModels(client: Anthropic): Promise<ModelInfo[]> {
       display_name: m.display_name,
       created_at: m.created_at,
       max_input_tokens: m.max_input_tokens ?? null,
-      max_tokens: m.max_tokens ?? null
+      max_tokens: m.max_tokens ?? null,
+      supports_adaptive_thinking: m.capabilities?.thinking?.types?.adaptive?.supported ?? false
     })
   }
   return models
@@ -43,7 +44,10 @@ function readCache(db: Database.Database): ModelsCache | null {
   if (raw === null) return null
   try {
     const cache = JSON.parse(raw) as ModelsCache
-    return Array.isArray(cache.models) && typeof cache.fetched_at === 'number' ? cache : null
+    if (!Array.isArray(cache.models) || typeof cache.fetched_at !== 'number') return null
+    // 項目が足りない古い形式のキャッシュは、取得し直すまでの間だけ使う
+    const complete = cache.models.every((m) => typeof m.supports_adaptive_thinking === 'boolean')
+    return complete ? cache : { ...cache, fetched_at: 0 }
   } catch {
     return null
   }
@@ -83,6 +87,11 @@ export class ModelService {
       if (!cache) throw apiError
       return { models: cache.models, fetched_at: cache.fetched_at, stale: true }
     }
+  }
+
+  /** キャッシュ済みのモデル情報（チャットのリクエスト組み立て用） */
+  getModelInfo(modelId: string): ModelInfo | null {
+    return readCache(this.db)?.models.find((m) => m.id === modelId) ?? null
   }
 
   getDefaultModel(): string | null {

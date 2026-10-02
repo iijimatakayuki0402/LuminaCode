@@ -6,6 +6,7 @@ import { Message, type MessageState } from '../components/Message'
 import { TypeBadge } from '../components/TypeBadge'
 import { unwrap } from '../lib/ipc'
 import { useModels } from '../lib/useModels'
+import { ChatView } from './ChatView'
 import { ja } from '../locales/ja'
 
 const threadTitle = (thread: Thread): string => thread.title ?? ja.project.untitled
@@ -214,9 +215,10 @@ export function ProjectScreen({
 
           {selected && (
             <>
-              <h2 style={{ marginTop: 0 }}>{threadTitle(selected)}</h2>
-              <div className="field" style={{ maxWidth: '32rem' }}>
-                <label htmlFor={modelSelectId}>{ja.project.threadModel}</label>
+              <div className="field thread-model">
+                <label htmlFor={modelSelectId}>
+                  {threadTitle(selected)} — {ja.project.threadModel}
+                </label>
                 <select
                   id={modelSelectId}
                   className="select mono"
@@ -236,7 +238,11 @@ export function ProjectScreen({
                   ))}
                 </select>
               </div>
-              <p className="empty">{ja.project.chatComingSoon}</p>
+              {project.type === 'chat' ? (
+                <ChatView threadId={selected.id} onThreadChanged={() => void reload()} />
+              ) : (
+                <p className="empty">{ja.chat.coworkComingSoon}</p>
+              )}
             </>
           )}
         </section>

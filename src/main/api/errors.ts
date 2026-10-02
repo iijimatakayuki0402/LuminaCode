@@ -6,7 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ApiErrorKind } from '@shared/ipc'
 
-const MESSAGES: Record<ApiErrorKind, string> = {
+export const API_ERROR_MESSAGES: Record<ApiErrorKind, string> = {
   auth: 'API キーが無効です。設定画面で API キーを確認してください。',
   permission:
     'この API キーには、この操作の権限がありません。設定画面で API キーを確認してください。',
@@ -29,7 +29,7 @@ export class ApiRequestError extends Error {
     public readonly kind: ApiErrorKind,
     public readonly status: number | undefined
   ) {
-    super(MESSAGES[kind])
+    super(API_ERROR_MESSAGES[kind])
     this.name = 'ApiRequestError'
   }
 }

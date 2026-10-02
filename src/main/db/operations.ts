@@ -6,10 +6,11 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import type {
+  ApiErrorKind,
   CreateProjectInput,
   CreateThreadInput,
-  Message,
   MessageRole,
+  MessageStatus,
   PermissionMode,
   Project,
   ProjectType,
@@ -48,7 +49,10 @@ interface ThreadRow {
   updated_at: number
 }
 
-interface MessageRow {
+/**
+ * messages テーブルの行（content_blocks は main 内でのみ使い、renderer には渡さない）
+ */
+export interface MessageRecord {
   id: string
   thread_id: string
   parent_id: string | null
@@ -56,6 +60,21 @@ interface MessageRow {
   content: string
   tokens_used: number | null
   estimated_cost: number | null
+  created_at: number
+  status: MessageStatus
+  content_blocks: string | null
+  model: string | null
+  stop_reason: string | null
+  error_kind: ApiErrorKind | null
+}
+
+export interface AttachmentRecord {
+  id: string
+  message_id: string
+  filename: string
+  stored_path: string
+  mime_type: string
+  size_bytes: number
   created_at: number
 }
 
@@ -381,14 +400,16 @@ export function getLastOpenedThread(db: Database.Database, projectId: string): T
 
 export interface CreateMessageInput {
   thread_id: string
-  parent_id?: string
+  parent_id?: string | null
   role: MessageRole
   content: string
   tokens_used?: number
   estimated_cost?: number
+  status?: MessageStatus
+  model?: string | null
 }
 
-export function createMessage(db: Database.Database, input: CreateMessageInput): Message {
+export function createMessage(db: Database.Database, input: CreateMessageInput): MessageRecord {
   const now = Date.now()
   const id = randomUUID()
 
@@ -397,8 +418,9 @@ export function createMessage(db: Database.Database, input: CreateMessageInput):
     db.prepare(
       `
       INSERT INTO messages (
-        id, thread_id, parent_id, role, content, tokens_used, estimated_cost, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, thread_id, parent_id, role, content, tokens_used, estimated_cost, created_at,
+        status, model
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     ).run(
       id,
@@ -408,7 +430,9 @@ export function createMessage(db: Database.Database, input: CreateMessageInput):
       input.content,
       input.tokens_used ?? null,
       input.estimated_cost ?? null,
-      now
+      now,
+      input.status ?? 'complete',
+      input.model ?? null
     )
 
     db.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').run(now, input.thread_id)
@@ -420,19 +444,116 @@ export function createMessage(db: Database.Database, input: CreateMessageInput):
   return getMessage(db, id)!
 }
 
-export function getMessage(db: Database.Database, id: string): Message | null {
+export function getMessage(db: Database.Database, id: string): MessageRecord | null {
   const stmt = db.prepare('SELECT * FROM messages WHERE id = ?')
-  const row = stmt.get(id) as MessageRow | undefined
+  const row = stmt.get(id) as MessageRecord | undefined
   return row ?? null
 }
 
-export function listMessagesByThread(db: Database.Database, threadId: string): Message[] {
+export function listMessagesByThread(db: Database.Database, threadId: string): MessageRecord[] {
   const stmt = db.prepare(`
     SELECT * FROM messages
     WHERE thread_id = ?
     ORDER BY created_at ASC, rowid ASC
   `)
-  return stmt.all(threadId) as MessageRow[]
+  return stmt.all(threadId) as MessageRecord[]
+}
+
+export interface UpdateMessageInput {
+  content?: string
+  status?: MessageStatus
+  content_blocks?: string | null
+  stop_reason?: string | null
+  error_kind?: ApiErrorKind | null
+  tokens_used?: number | null
+  estimated_cost?: number | null
+}
+
+const UPDATABLE_MESSAGE_COLUMNS: (keyof UpdateMessageInput)[] = [
+  'content',
+  'status',
+  'content_blocks',
+  'stop_reason',
+  'error_kind',
+  'tokens_used',
+  'estimated_cost'
+]
+
+/**
+ * 応答の内容・状態を更新する（ストリーミングの完了・停止・エラー時）
+ */
+export function updateMessage(db: Database.Database, id: string, input: UpdateMessageInput): void {
+  const columns = UPDATABLE_MESSAGE_COLUMNS.filter((c) => input[c] !== undefined)
+  if (columns.length === 0) return
+  db.prepare(`UPDATE messages SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(
+    ...columns.map((c) => input[c] ?? null),
+    id
+  )
+}
+
+/**
+ * 生成中のまま残った応答を「中断」にする（要件 6.14: 異常終了後の再起動時）
+ */
+export function markStreamingInterrupted(db: Database.Database): number {
+  return db.prepare("UPDATE messages SET status = 'interrupted' WHERE status = 'streaming'").run()
+    .changes
+}
+
+// ========================================
+// Attachment操作（要件 ATT-04）
+// ========================================
+
+export function insertAttachment(
+  db: Database.Database,
+  input: Omit<AttachmentRecord, 'created_at'>
+): AttachmentRecord {
+  const record = { ...input, created_at: Date.now() }
+  db.prepare(
+    `INSERT INTO attachments (id, message_id, filename, stored_path, mime_type, size_bytes, created_at)
+     VALUES (@id, @message_id, @filename, @stored_path, @mime_type, @size_bytes, @created_at)`
+  ).run(record)
+  return record
+}
+
+export function listAttachmentsByThread(
+  db: Database.Database,
+  threadId: string
+): AttachmentRecord[] {
+  return db
+    .prepare(
+      `SELECT a.* FROM attachments a JOIN messages m ON m.id = a.message_id
+       WHERE m.thread_id = ? ORDER BY a.created_at ASC, a.rowid ASC`
+    )
+    .all(threadId) as AttachmentRecord[]
+}
+
+// ========================================
+// UsageRecord操作（要件 USG）
+// ========================================
+
+export interface UsageInput {
+  project_id: string
+  project_name: string
+  thread_id: string
+  message_id: string
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  estimated_cost: number
+}
+
+export function insertUsageRecord(db: Database.Database, input: UsageInput): void {
+  db.prepare(
+    `INSERT INTO usage_records (
+       id, project_id, project_name, thread_id, message_id, model, input_tokens, output_tokens,
+       cache_read_tokens, cache_write_tokens, estimated_cost, created_at
+     ) VALUES (
+       @id, @project_id, @project_name, @thread_id, @message_id, @model, @input_tokens,
+       @output_tokens, @cache_read_tokens, @cache_write_tokens, @estimated_cost, @created_at
+     )`
+  ).run({ ...input, id: randomUUID(), created_at: Date.now() })
 }
 
 // ========================================

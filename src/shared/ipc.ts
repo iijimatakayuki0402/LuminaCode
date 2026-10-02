@@ -4,14 +4,21 @@
  */
 
 import type {
+  ApiErrorKind,
   ApiKeyStatus,
   Appearance,
+  ChatEvent,
+  ChatPrefs,
+  EditAndResendInput,
   CreateProjectInput,
   CreateThreadInput,
   ListProjectsOptions,
   Message,
   ModelList,
   Project,
+  SendMessageInput,
+  SendResult,
+  StageResult,
   Thread,
   UpdateProjectInput,
   UpdateThreadInput
@@ -56,6 +63,23 @@ export interface IpcContract {
   'settings:getAppearance': { args: []; result: Appearance }
   'settings:setAppearance': { args: [input: Partial<Appearance>]; result: Appearance }
 
+  'settings:getChatPrefs': { args: []; result: ChatPrefs }
+  'settings:setChatPrefs': { args: [input: Partial<ChatPrefs>]; result: ChatPrefs }
+
+  'chat:send': { args: [input: SendMessageInput]; result: SendResult }
+  /** 最新のユーザーメッセージに対する応答を作り直す（エラー・停止後の再試行） */
+  'chat:regenerate': { args: [userMessageId: string]; result: Message }
+  'chat:editAndResend': { args: [input: EditAndResendInput]; result: SendResult }
+  'chat:stop': { args: [threadId: string]; result: void }
+
+  /** ファイル選択ダイアログで選び、仮置きする */
+  'attachments:select': { args: []; result: StageResult }
+  /** ドラッグ＆ドロップしたファイルを仮置きする */
+  'attachments:stagePaths': { args: [paths: string[]]; result: StageResult }
+  /** 貼り付けた画像を仮置きする */
+  'attachments:stageData': { args: [filename: string, data: Uint8Array]; result: StageResult }
+  'attachments:discard': { args: [id: string]; result: void }
+
   /** フォルダ選択ダイアログ（キャンセル時は null） */
   'dialog:selectFolder': { args: [defaultPath?: string]; result: string | null }
 }
@@ -76,23 +100,7 @@ export type IpcReturn<C extends IpcChannel> = IpcContract[C]['result']
 export type IpcErrorCode =
   'validation' | 'not_found' | 'invalid_argument' | 'forbidden' | 'api' | 'internal'
 
-/**
- * API エラーの種別（要件 6.14）
- * auth・permission は API キーの再設定、billing はコンソールの確認を促す
- */
-export type ApiErrorKind =
-  | 'auth'
-  | 'permission'
-  | 'billing'
-  | 'rate_limit'
-  | 'overloaded'
-  | 'server'
-  | 'offline'
-  | 'timeout'
-  | 'too_large'
-  | 'bad_request'
-  | 'not_found'
-  | 'unknown'
+export type { ApiErrorKind } from './types'
 
 export interface IpcError {
   code: IpcErrorCode
@@ -151,4 +159,27 @@ export interface LuminaApi {
   dialog: {
     selectFolder: Invoke<'dialog:selectFolder'>
   }
+  chatPrefs: {
+    get: Invoke<'settings:getChatPrefs'>
+    set: Invoke<'settings:setChatPrefs'>
+  }
+  chat: {
+    send: Invoke<'chat:send'>
+    regenerate: Invoke<'chat:regenerate'>
+    editAndResend: Invoke<'chat:editAndResend'>
+    stop: Invoke<'chat:stop'>
+    /** 生成中の通知を受け取る。戻り値で解除する */
+    onEvent: (listener: (event: ChatEvent) => void) => () => void
+  }
+  attachments: {
+    select: Invoke<'attachments:select'>
+    stagePaths: Invoke<'attachments:stagePaths'>
+    stageData: Invoke<'attachments:stageData'>
+    discard: Invoke<'attachments:discard'>
+    /** ドロップされた File の実パス（preload の webUtils で取得する） */
+    pathForFile: (file: File) => string
+  }
 }
+
+/** main → renderer の通知チャンネル */
+export const CHAT_EVENT_CHANNEL = 'chat:event'

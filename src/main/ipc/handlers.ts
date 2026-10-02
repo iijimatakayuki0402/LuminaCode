@@ -12,6 +12,10 @@ import type { ModelService } from '../models/modelService'
 import { normalizeApiKey, type ApiKeyStore } from '../secrets/apiKeyStore'
 import { validateWorkFolder, type WorkFolderPolicy } from '../security/workFolder'
 import { getAppearance, setAppearance } from '../settings/appearance'
+import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
+import type { AttachmentStore } from '../chat/attachments'
+import type { ChatService } from '../chat/chatService'
+import type { AttachmentInfo, StageResult } from '@shared/types'
 import { NotFoundError } from './errors'
 import * as v from './validate'
 
@@ -28,6 +32,24 @@ export interface HandlerDeps {
   workFolderPolicy: WorkFolderPolicy
   /** フォルダ選択ダイアログを表示する（Electron 依存のため外から渡す） */
   selectFolder: (defaultPath?: string) => Promise<string | null>
+  /** ファイル選択ダイアログを表示する（複数選択。キャンセル時は空） */
+  selectFiles: () => Promise<string[]>
+  chatService: ChatService
+  attachments: AttachmentStore
+}
+
+/** 複数ファイルを仮置きし、失敗したものは理由をまとめて返す */
+function stageAll(items: (() => AttachmentInfo)[]): StageResult {
+  const result: StageResult = { staged: [], errors: [] }
+  for (const stage of items) {
+    try {
+      result.staged.push(stage())
+    } catch (error) {
+      if (!(error instanceof ops.ValidationError)) throw error
+      result.errors.push(error.message)
+    }
+  }
+  return result
 }
 
 function found<T>(value: T | null, message: string): T {
@@ -50,7 +72,10 @@ export function createHandlers({
   modelService,
   createClient,
   workFolderPolicy,
-  selectFolder
+  selectFolder,
+  selectFiles,
+  chatService,
+  attachments
 }: HandlerDeps): IpcHandlers {
   // 作業フォルダは要件 PRJ-05 の検証を通し、実体パスで保存する
   const checkWorkFolder = <T extends { work_folder?: string }>(input: T): T =>
@@ -98,7 +123,7 @@ export function createHandlers({
     'threads:getLastOpened': (projectId) =>
       ops.getLastOpenedThread(db, v.id(projectId, 'projectId')),
 
-    'messages:listByThread': (threadId) => ops.listMessagesByThread(db, v.id(threadId, 'threadId')),
+    'messages:listByThread': (threadId) => chatService.listMessages(v.id(threadId, 'threadId')),
 
     'apiKey:getStatus': () => apiKeyStore.status(),
     'apiKey:save': async (input) => {
@@ -125,6 +150,27 @@ export function createHandlers({
 
     'settings:getAppearance': () => getAppearance(db),
     'settings:setAppearance': (input) => setAppearance(db, v.appearanceInput(input, 'input')),
+
+    'settings:getChatPrefs': () => getChatPrefs(db),
+    'settings:setChatPrefs': (input) => setChatPrefs(db, v.chatPrefsInput(input, 'input')),
+
+    'chat:send': (input) => chatService.send(v.sendMessageInput(input, 'input')),
+    'chat:regenerate': (userMessageId) =>
+      chatService.regenerate(v.id(userMessageId, 'userMessageId')),
+    'chat:editAndResend': (input) =>
+      chatService.editAndResend(v.editAndResendInput(input, 'input')),
+    'chat:stop': (threadId) => chatService.stop(v.id(threadId, 'threadId')),
+
+    'attachments:select': async () =>
+      stageAll((await selectFiles()).map((p) => () => attachments.stageFromPath(p))),
+    'attachments:stagePaths': (input) =>
+      stageAll(v.paths(input, 'paths').map((p) => () => attachments.stageFromPath(p))),
+    'attachments:stageData': (filename, data) => {
+      const name = v.str(filename, 'filename')
+      const content = v.bytes(data, 'data')
+      return stageAll([() => attachments.stageFromData(name, content)])
+    },
+    'attachments:discard': (attachmentId) => attachments.discard(v.id(attachmentId, 'id')),
 
     'dialog:selectFolder': (defaultPath) =>
       selectFolder(v.optional(v.str)(defaultPath, 'defaultPath'))

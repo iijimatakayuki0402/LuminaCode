@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { ACCENTS, MODES } from '@shared/theme'
-import type { ApiKeyStatus, Appearance, ModelList } from '@shared/types'
+import type { ApiKeyStatus, Appearance, ChatPrefs, ModelList } from '@shared/types'
 import { ApiKeyForm } from '../components/ApiKeyForm'
 import { Message, type MessageState } from '../components/Message'
 import { unwrap } from '../lib/ipc'
@@ -26,6 +26,7 @@ export function SettingsScreen({
       <ApiKeySection status={status} onStatusChange={onStatusChange} />
       <ModelSection configured={status.configured} />
       <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
+      <ChatPrefsSection />
     </main>
   )
 }
@@ -90,6 +91,52 @@ function AppearanceSection({
           ))}
         </div>
       </fieldset>
+      <Message message={message} />
+    </section>
+  )
+}
+
+/**
+ * 入力の設定（CHT-09: 送信キーの入れ替え）
+ */
+function ChatPrefsSection(): React.JSX.Element {
+  const [prefs, setPrefs] = useState<ChatPrefs | null>(null)
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.chatPrefs.get())
+      .then((p) => active && setPrefs(p))
+      .catch((e: unknown) => active && setMessage({ tone: 'error', text: (e as Error).message }))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const update = async (sendKey: ChatPrefs['sendKey']): Promise<void> => {
+    try {
+      setPrefs(await unwrap(window.lumina.chatPrefs.set({ sendKey })))
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="settings-chat">
+      <h2 id="settings-chat">{ja.chat.sendKey}</h2>
+      <div className="segmented">
+        {(['enter', 'ctrl_enter'] as const).map((key) => (
+          <label key={key}>
+            <input
+              type="radio"
+              name="send-key"
+              checked={prefs?.sendKey === key}
+              onChange={() => void update(key)}
+            />
+            {ja.chat.sendKeys[key]}
+          </label>
+        ))}
+      </div>
       <Message message={message} />
     </section>
   )

@@ -33,15 +33,61 @@ export interface Thread {
   updated_at: number
 }
 
+/**
+ * 応答の状態
+ *   streaming 生成中 / complete 完了 / stopped 停止（CHT-04、途中までを保持）/
+ *   error エラー / interrupted 異常終了で中断（6.14）
+ */
+export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error' | 'interrupted'
+
+/**
+ * API エラーの種別（要件 6.14）
+ * auth・permission は API キーの再設定、billing はコンソールの確認を促す
+ */
+export type ApiErrorKind =
+  | 'auth'
+  | 'permission'
+  | 'billing'
+  | 'rate_limit'
+  | 'overloaded'
+  | 'server'
+  | 'offline'
+  | 'timeout'
+  | 'too_large'
+  | 'bad_request'
+  | 'not_found'
+  | 'unknown'
+
+export type AttachmentKind = 'image' | 'pdf' | 'text'
+
+export interface AttachmentInfo {
+  id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  kind: AttachmentKind
+  /** 画像のサムネイル（data URL）。送信前のプレビュー用（ATT-05） */
+  preview?: string
+}
+
 export interface Message {
   id: string
   thread_id: string
+  /** 分岐用の親メッセージ（CHT-14 の編集・再送信で、同じ親を持つ兄弟ができる） */
   parent_id: string | null
   role: MessageRole
   content: string
   tokens_used: number | null
   estimated_cost: number | null
   created_at: number
+  status: MessageStatus
+  /** 応答に使ったモデル */
+  model: string | null
+  stop_reason: string | null
+  error_kind: ApiErrorKind | null
+  /** 思考の要約（折りたたみ表示用。CHT-07） */
+  thinking: string | null
+  attachments: AttachmentInfo[]
 }
 
 export interface Setting {
@@ -100,6 +146,60 @@ export interface Appearance {
 }
 
 // ========================================
+// 通常チャット（要件 6.4）
+// ========================================
+
+export interface SendMessageInput {
+  threadId: string
+  content: string
+  /** 仮置き済みの添付ファイルの ID */
+  attachmentIds: string[]
+}
+
+export interface EditAndResendInput {
+  /** 編集する最新のユーザーメッセージ（CHT-14） */
+  userMessageId: string
+  content: string
+  /** 元のメッセージから引き継ぐ添付ファイルの ID */
+  keepAttachmentIds: string[]
+  /** 新しく追加する仮置き済みの添付ファイルの ID */
+  attachmentIds: string[]
+}
+
+export interface SendResult {
+  userMessage: Message
+  assistantMessage: Message
+}
+
+export interface StageResult {
+  staged: AttachmentInfo[]
+  /** 追加できなかったファイルの理由（画面にそのまま表示できる） */
+  errors: string[]
+}
+
+export interface ChatPrefs {
+  /** 送信キー（CHT-09: 既定は Enter。Ctrl+Enter に変更できる） */
+  sendKey: 'enter' | 'ctrl_enter'
+}
+
+/**
+ * 生成中の応答の通知（main → renderer）
+ */
+export type ChatEvent =
+  | { type: 'text'; threadId: string; messageId: string; text: string }
+  | { type: 'thinking'; threadId: string; messageId: string; text: string }
+  | {
+      type: 'retrying'
+      threadId: string
+      messageId: string
+      attempt: number
+      maxAttempts: number
+      waitMs: number
+      message: string
+    }
+  | { type: 'finished'; threadId: string; message: Message; errorMessage: string | null }
+
+// ========================================
 // API キー・モデル（要件 6.8）
 // ========================================
 
@@ -117,6 +217,8 @@ export interface ModelInfo {
   created_at: string
   max_input_tokens: number | null
   max_tokens: number | null
+  /** adaptive thinking に対応しているか（Models API の capabilities から判定） */
+  supports_adaptive_thinking: boolean
 }
 
 export interface ModelList {

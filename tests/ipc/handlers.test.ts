@@ -13,6 +13,8 @@ import type { ApiKeyStatus, Appearance, ModelList, Project, Thread } from '../..
 import { createInMemoryDatabase } from '../../src/main/db/init'
 import { createHandlers, type IpcHandlers } from '../../src/main/ipc/handlers'
 import { invokeHandler } from '../../src/main/ipc/register'
+import { AttachmentStore } from '../../src/main/chat/attachments'
+import { ChatService } from '../../src/main/chat/chatService'
 import { ModelService } from '../../src/main/models/modelService'
 import { ApiKeyStore, type SecretCipher } from '../../src/main/secrets/apiKeyStore'
 import { apiError, fakeClient } from '../helpers/fakeAnthropic'
@@ -65,11 +67,24 @@ beforeEach(() => {
     return key === null ? null : createClient(key)
   })
 
+  const attachments = new AttachmentStore(join(dir, 'attachments'))
+  const chatService = new ChatService({
+    db,
+    attachments,
+    modelService,
+    getApiKey: () => apiKeyStore.get(),
+    createClient,
+    emit: () => undefined
+  })
+
   handlers = createHandlers({
     db,
     apiKeyStore,
     modelService,
     createClient,
+    chatService,
+    attachments,
+    selectFiles: async () => [],
     workFolderPolicy: {
       userDataPath: join(dir, 'userData'),
       homeDir: join(dir, 'home'),
@@ -359,6 +374,57 @@ describe('Stage 4: 作業フォルダ・一覧・表示設定・フォルダ選�
     selectedFolder = null
     expect(await value('dialog:selectFolder')).toBeNull()
     expect(await call('dialog:selectFolder', 1)).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+  })
+})
+
+describe('Stage 5: チャット・添付ファイルの引数検証', () => {
+  it('送信の引数を検証し、キー未設定なら validation', async () => {
+    const project = await value<Project>('projects:create', { type: 'chat', name: 'P' })
+    const thread = await value<Thread>('threads:create', { project_id: project.id })
+
+    expect(
+      await call('chat:send', { threadId: thread.id, content: 1, attachmentIds: [] })
+    ).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+    expect(
+      await call('chat:send', { threadId: thread.id, content: 'x', attachmentIds: [], extra: 1 })
+    ).toMatchObject({ error: { code: 'invalid_argument' } })
+    expect(
+      await call('chat:send', { threadId: thread.id, content: 'x', attachmentIds: [] })
+    ).toMatchObject({
+      error: { code: 'validation', message: expect.stringContaining('API キー') }
+    })
+  })
+
+  it('貼り付けた画像を仮置きでき、形式エラーは理由を返す', async () => {
+    const ok = await value<{ staged: { filename: string }[]; errors: string[] }>(
+      'attachments:stageData',
+      'paste.png',
+      new Uint8Array([1, 2, 3])
+    )
+    expect(ok.staged.map((s) => s.filename)).toEqual(['paste.png'])
+
+    const ng = await value<{ staged: unknown[]; errors: string[] }>(
+      'attachments:stageData',
+      'a.docx',
+      new Uint8Array([1])
+    )
+    expect(ng.staged).toEqual([])
+    expect(ng.errors[0]).toContain('Office')
+    expect(await call('attachments:stageData', 'a.png', 'not-bytes')).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+  })
+
+  it('送信キーの設定（CHT-09）', async () => {
+    expect(await value('settings:getChatPrefs')).toEqual({ sendKey: 'enter' })
+    expect(await value('settings:setChatPrefs', { sendKey: 'ctrl_enter' })).toEqual({
+      sendKey: 'ctrl_enter'
+    })
+    expect(await call('settings:setChatPrefs', { sendKey: 'shift' })).toMatchObject({
       error: { code: 'invalid_argument' }
     })
   })

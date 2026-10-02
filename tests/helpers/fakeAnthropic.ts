@@ -29,6 +29,7 @@ export function fakeClient(behavior: { models?: FakeModel[]; error?: unknown }):
     display_name: m.id,
     max_input_tokens: 1000000,
     max_tokens: 128000,
+    capabilities: { thinking: { types: { adaptive: { supported: m.id.includes('sonnet') } } } },
     ...m
   }))
   const list = (): unknown => {
