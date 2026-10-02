@@ -21,6 +21,7 @@ import type {
   PermissionResponse,
   SearchQuery,
   SendMessageInput,
+  SnippetInput,
   ToolCategory,
   ToolEventFilter,
   UsageLimits,
@@ -236,4 +237,10 @@ export const updateThreadInput = object<UpdateThreadInput>({
   model: optional(str),
   extended_thinking: optional(bool),
   effort: optional(oneOf<EffortLevel | ''>([...EFFORT_LEVELS, '']))
+})
+
+export const snippetInput = object<SnippetInput>({
+  id: optional(id),
+  name: str,
+  content: str
 })

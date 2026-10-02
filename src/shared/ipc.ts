@@ -49,7 +49,9 @@ import type {
   UsageSummary,
   UsageTotals,
   UpdateProjectInput,
-  UpdateThreadInput
+  UpdateThreadInput,
+  Snippet,
+  SnippetInput
 } from './types'
 
 export interface AppInfo {
@@ -128,6 +130,10 @@ export interface IpcContract {
   /** 全プロジェクト共通のカスタム指示（PRJ-08） */
   'settings:getGlobalInstructions': { args: []; result: string }
   'settings:setGlobalInstructions': { args: [text: string]; result: string }
+  /** スニペット（CHT-12）。保存・削除は更新後の一覧を返す */
+  'snippets:list': { args: []; result: Snippet[] }
+  'snippets:save': { args: [input: SnippetInput]; result: Snippet[] }
+  'snippets:delete': { args: [id: string]; result: Snippet[] }
 
   /** Cowork: 確認ダイアログへの回答 */
   'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
@@ -305,6 +311,11 @@ export interface LuminaApi {
   instructions: {
     get: Invoke<'settings:getGlobalInstructions'>
     set: Invoke<'settings:setGlobalInstructions'>
+  }
+  snippets: {
+    list: Invoke<'snippets:list'>
+    save: Invoke<'snippets:save'>
+    delete: Invoke<'snippets:delete'>
   }
   chat: {
     send: Invoke<'chat:send'>

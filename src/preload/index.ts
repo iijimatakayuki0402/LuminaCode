@@ -83,6 +83,11 @@ const api: LuminaApi = {
     get: invoke('settings:getGlobalInstructions'),
     set: invoke('settings:setGlobalInstructions')
   },
+  snippets: {
+    list: invoke('snippets:list'),
+    save: invoke('snippets:save'),
+    delete: invoke('snippets:delete')
+  },
   chat: {
     send: invoke('chat:send'),
     regenerate: invoke('chat:regenerate'),

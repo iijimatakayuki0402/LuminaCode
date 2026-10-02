@@ -599,3 +599,17 @@ export interface LicenseList {
   appLicense: string | null
   packages: LicenseEntry[]
 }
+
+/** 定型プロンプト（スニペット。CHT-12） */
+export interface Snippet {
+  id: string
+  name: string
+  content: string
+}
+
+export interface SnippetInput {
+  /** 省略すると追加 */
+  id?: string
+  name: string
+  content: string
+}

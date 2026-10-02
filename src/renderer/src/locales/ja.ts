@@ -9,6 +9,8 @@ export const ja = {
   common: {
     save: '保存',
     cancel: 'キャンセル',
+    edit: '編集',
+    delete: '削除',
     back: '戻る',
     loading: '読み込み中…'
   },
@@ -366,6 +368,22 @@ export const ja = {
     appLogCleared: 'アプリログを削除しました。',
     logNote:
       '操作ログ（Cowork のツール実行の記録）は、操作ログの画面で期間を指定して削除できます。アプリログには会話の内容や API キーは含まれません。'
+  },
+  snippets: {
+    section: 'スニペット（定型の依頼文）',
+    note: 'よく使う依頼文を保存しておくと、入力欄の「スニペット」から呼び出せます（すべてのプロジェクトで使えます）。',
+    none: 'スニペットはまだありません。',
+    name: '名前',
+    content: '内容',
+    add: '追加',
+    update: '更新',
+    saved: '保存しました。',
+    deleteTitle: 'スニペットの削除',
+    deleteConfirm: (name: string) => `スニペット「${name}」を削除しますか？`,
+    button: 'スニペット',
+    filter: '名前・内容で絞り込み',
+    emptyPicker: 'スニペットがありません。設定画面で追加できます。',
+    noMatch: '一致するスニペットがありません。'
   },
   instructions: {
     section: '共通のカスタム指示',

@@ -21,6 +21,7 @@ import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Markdown } from '../components/Markdown'
 import { unwrap } from '../lib/ipc'
 import { useShortcuts } from '../lib/useShortcuts'
+import { SnippetPicker } from '../components/Snippets'
 import { ja } from '../locales/ja'
 
 interface Live {
@@ -891,6 +892,7 @@ function Composer({
   onError: (e: unknown) => void
 }): React.JSX.Element {
   const [text, setText] = useState('')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const [dragging, setDragging] = useState(false)
   const [sending, setSending] = useState(false)
   const staging = useStaging(onError)
@@ -906,6 +908,18 @@ function Composer({
       : []
   const applyCommand = (command: SlashCommand): void =>
     setText(expandCommand(command.content, typed?.args ?? ''))
+
+  // CHT-12: スニペットをカーソル位置に挿入する（選択中の文字は置き換える）
+  const insertSnippet = (content: string): void => {
+    const el = inputRef.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? text.length
+    setText(text.slice(0, start) + content + text.slice(end))
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(start + content.length, start + content.length)
+    })
+  }
 
   const submit = async (): Promise<void> => {
     if (!canSend) return
@@ -979,6 +993,7 @@ function Composer({
         </ul>
       )}
       <textarea
+        ref={inputRef}
         className="input textarea composer-input"
         value={text}
         placeholder={ja.chat.placeholder(sendKey)}
@@ -988,13 +1003,14 @@ function Composer({
         onPaste={onPaste}
       />
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        {allowAttachments ? (
-          <button className="btn btn-sm" type="button" onClick={() => void staging.select()}>
-            📎 {ja.chat.attach}
-          </button>
-        ) : (
-          <span />
-        )}
+        <span className="row">
+          {allowAttachments && (
+            <button className="btn btn-sm" type="button" onClick={() => void staging.select()}>
+              📎 {ja.chat.attach}
+            </button>
+          )}
+          <SnippetPicker disabled={disabled} onInsert={insertSnippet} />
+        </span>
         {generating ? (
           <button className="btn btn-danger" type="button" onClick={onStop}>
             ■ {ja.chat.stop}

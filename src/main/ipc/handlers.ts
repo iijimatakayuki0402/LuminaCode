@@ -14,6 +14,7 @@ import { validateWorkFolder, type WorkFolderPolicy } from '../security/workFolde
 import { getAppearance, setAppearance } from '../settings/appearance'
 import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
 import { getGlobalInstructions, setGlobalInstructions } from '../settings/instructions'
+import { deleteSnippet, listSnippets, saveSnippet } from '../settings/snippets'
 import { leafFrom } from '@shared/conversation'
 import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
@@ -281,6 +282,9 @@ export function createHandlers({
     },
     'settings:getGlobalInstructions': () => getGlobalInstructions(db),
     'settings:setGlobalInstructions': (text) => setGlobalInstructions(db, v.str(text, 'text')),
+    'snippets:list': () => listSnippets(db),
+    'snippets:save': (input) => saveSnippet(db, v.snippetInput(input, 'input')),
+    'snippets:delete': (id) => deleteSnippet(db, v.id(id, 'id')),
     'chat:stop': (threadId) => {
       const checked = v.id(threadId, 'threadId')
       engineForThread(checked).stop(checked)

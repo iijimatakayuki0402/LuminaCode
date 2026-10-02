@@ -15,6 +15,7 @@ import type {
 import { ApiKeyForm } from '../components/ApiKeyForm'
 import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
+import { SnippetsSection } from '../components/Snippets'
 import { unwrap } from '../lib/ipc'
 import { ja } from '../locales/ja'
 
@@ -51,6 +52,7 @@ export function SettingsScreen({
       <ModelSection configured={status.configured} />
       <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
       <GlobalInstructionsSection />
+      <SnippetsSection />
       <ChatPrefsSection />
       <ShortcutsSection />
       <CoworkPrefsSection />
