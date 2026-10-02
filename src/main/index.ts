@@ -1,11 +1,14 @@
+import { writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
 import { CHAT_EVENT_CHANNEL } from '@shared/ipc'
 import { createAnthropicClient } from './api/client'
 import { AttachmentStore } from './chat/attachments'
 import { ChatService } from './chat/chatService'
+import { CoworkService } from './cowork/coworkService'
+import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
 import { closeDatabase, DatabaseIntegrityError, getDatabase } from './db/init'
 import { getMessage } from './db/operations'
@@ -62,6 +65,19 @@ function createWindow(): void {
 }
 
 let chatService: ChatService | null = null
+let coworkService: CoworkService | null = null
+
+/**
+ * 同梱の claude.exe のパス（パッケージ化したアプリでは asar の外に展開されている）
+ */
+function resolveClaudeExecutable(): string | undefined {
+  try {
+    const pkg = require.resolve('@anthropic-ai/claude-agent-sdk-win32-x64/package.json')
+    return join(dirname(pkg), 'claude.exe').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * DB を開き、IPC を登録する。失敗した場合はメッセージを表示して false を返す
@@ -118,6 +134,26 @@ function setupBackend(): boolean {
   // モデル一覧が古い・無い場合は、起動時に裏で更新する（既定モデルの設定にも必要）
   if (apiKeyStore.get() !== null) void modelService.list().catch(() => undefined)
 
+  coworkService = new CoworkService({
+    db,
+    snapshotsDir: getSnapshotsDir(),
+    modelService,
+    getApiKey: () => apiKeyStore.get(),
+    configDir: join(app.getPath('userData'), 'agent'),
+    executablePath: app.isPackaged ? resolveClaudeExecutable() : undefined,
+    emit: (event) => {
+      for (const win of BrowserWindow.getAllWindows())
+        win.webContents.send(CHAT_EVENT_CHANNEL, event)
+    }
+  })
+
+  // LOG-03: 保持期間（90 日）を過ぎた操作ログを削除する
+  try {
+    deleteToolEventsBefore(db, Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000)
+  } catch (error) {
+    console.warn('[startup] log cleanup failed:', error)
+  }
+
   // 要件 6.14: 前回、生成中のまま終了した応答を「中断」として表示する
   const interrupted = chatService.recoverInterrupted()
   if (interrupted > 0) console.warn(`[startup] marked ${interrupted} message(s) as interrupted`)
@@ -128,7 +164,20 @@ function setupBackend(): boolean {
       apiKeyStore,
       modelService,
       chatService,
+      coworkService,
       attachments,
+      saveFile: async (defaultName, content) => {
+        const owner = BrowserWindow.getFocusedWindow()
+        const options: Electron.SaveDialogOptions = {
+          defaultPath: join(app.getPath('documents'), defaultName)
+        }
+        const result = owner
+          ? await dialog.showSaveDialog(owner, options)
+          : await dialog.showSaveDialog(options)
+        if (result.canceled || !result.filePath) return null
+        writeFileSync(result.filePath, content, 'utf-8')
+        return result.filePath
+      },
       selectFiles: async () => {
         const owner = BrowserWindow.getFocusedWindow()
         const options: Electron.OpenDialogOptions = { properties: ['openFile', 'multiSelections'] }
@@ -189,9 +238,11 @@ app.on('before-quit', (event) => {
   quitting = true
   event.preventDefault()
   for (const threadId of chatService.activeThreadIds()) chatService.stop(threadId)
-  void Promise.race([chatService.whenIdle(), new Promise((r) => setTimeout(r, 3000))]).then(() =>
-    app.quit()
-  )
+  for (const threadId of coworkService?.activeThreadIds() ?? []) coworkService?.stop(threadId)
+  void Promise.race([
+    Promise.all([chatService.whenIdle(), coworkService?.whenIdle()]),
+    new Promise((r) => setTimeout(r, 3000))
+  ]).then(() => app.quit())
 })
 
 app.on('will-quit', () => {

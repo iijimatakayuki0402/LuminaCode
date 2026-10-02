@@ -8,8 +8,10 @@
 import type Database from 'better-sqlite3'
 import { app } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+import type { FileChange } from '@shared/types'
+import { moveToTrash, restoreTrashedPath } from './trash'
 
 export interface Snapshot {
   id: string
@@ -20,6 +22,12 @@ export interface Snapshot {
   size_bytes: number
   sha256: string
   created_at: number
+  /** 変更を行った実行（応答メッセージ）。一括 Undo の単位（SEC-15） */
+  message_id: string | null
+  kind: 'modified' | 'created' | 'trashed'
+  /** kind = trashed のときの退避先 */
+  trash_path: string | null
+  restored_at: number | null
 }
 
 /**
@@ -38,7 +46,8 @@ export function createSnapshot(
   db: Database.Database,
   snapshotsDir: string,
   threadId: string,
-  filePath: string
+  filePath: string,
+  messageId: string | null = null
 ): Snapshot {
   const content = readFileSync(filePath)
   const snapshot: Snapshot = {
@@ -48,7 +57,11 @@ export function createSnapshot(
     stored_path: join(threadId, randomUUID()),
     size_bytes: content.length,
     sha256: sha256(content),
-    created_at: Date.now()
+    created_at: Date.now(),
+    message_id: messageId,
+    kind: 'modified',
+    trash_path: null,
+    restored_at: null
   }
 
   const storedFile = join(snapshotsDir, snapshot.stored_path)
@@ -58,8 +71,10 @@ export function createSnapshot(
   try {
     db.prepare(
       `
-      INSERT INTO snapshots (id, thread_id, file_path, stored_path, size_bytes, sha256, created_at)
-      VALUES (@id, @thread_id, @file_path, @stored_path, @size_bytes, @sha256, @created_at)
+      INSERT INTO snapshots (id, thread_id, file_path, stored_path, size_bytes, sha256, created_at,
+        message_id, kind, trash_path, restored_at)
+      VALUES (@id, @thread_id, @file_path, @stored_path, @size_bytes, @sha256, @created_at,
+        @message_id, @kind, @trash_path, @restored_at)
     `
     ).run(snapshot)
   } catch (error) {
@@ -114,4 +129,143 @@ export function pruneOrphanSnapshotFiles(db: Database.Database, snapshotsDir: st
     removed++
   }
   return removed
+}
+
+/**
+ * 内容を持たない変更（新規作成・退避）を記録する
+ */
+export function recordChange(
+  db: Database.Database,
+  input: {
+    threadId: string
+    messageId: string
+    filePath: string
+    kind: 'created' | 'trashed'
+    trashPath?: string
+  }
+): void {
+  db.prepare(
+    `INSERT INTO snapshots (id, thread_id, file_path, stored_path, size_bytes, sha256, created_at,
+       message_id, kind, trash_path)
+     VALUES (?, ?, ?, '', 0, '', ?, ?, ?, ?)`
+  ).run(
+    randomUUID(),
+    input.threadId,
+    input.filePath,
+    Date.now(),
+    input.messageId,
+    input.kind,
+    input.trashPath ?? null
+  )
+}
+
+function listByMessage(db: Database.Database, messageId: string): Snapshot[] {
+  return db
+    .prepare('SELECT * FROM snapshots WHERE message_id = ? ORDER BY created_at ASC, rowid ASC')
+    .all(messageId) as Snapshot[]
+}
+
+/** ファイルごとに、その実行で最初の記録（実行前の状態）を返す */
+function firstPerFile(records: Snapshot[]): Snapshot[] {
+  const seen = new Map<string, Snapshot>()
+  for (const r of records) {
+    const key = r.file_path.toLowerCase()
+    if (!seen.has(key)) seen.set(key, r)
+  }
+  return [...seen.values()]
+}
+
+/**
+ * 実行（応答メッセージ）単位の変更の一覧（SEC-15）
+ */
+export function listChanges(
+  db: Database.Database,
+  workRoot: string,
+  messageId: string
+): FileChange[] {
+  return firstPerFile(listByMessage(db, messageId)).map((r) => ({
+    snapshotId: r.id,
+    path: relative(workRoot, r.file_path),
+    kind: r.kind,
+    restored: r.restored_at !== null
+  }))
+}
+
+export interface UndoResult {
+  restored: string[]
+  skipped: { path: string; reason: string }[]
+}
+
+/**
+ * 実行単位で「ここまでの変更を元に戻す」（SEC-15）
+ * 新しく作られたファイルは消さずに退避する。Bash 経由の変更は対象外（SEC-16）。
+ */
+export function undoRun(
+  db: Database.Database,
+  snapshotsDir: string,
+  workRoot: string,
+  messageId: string
+): UndoResult {
+  const records = firstPerFile(listByMessage(db, messageId).filter((r) => r.restored_at === null))
+  const result: UndoResult = { restored: [], skipped: [] }
+  // 後から行った変更から順に戻す
+  for (const r of [...records].reverse()) {
+    const path = relative(workRoot, r.file_path)
+    try {
+      if (r.kind === 'modified') {
+        const content = readSnapshotContent(snapshotsDir, r)
+        mkdirSync(dirname(r.file_path), { recursive: true })
+        writeFileSync(r.file_path, content)
+      } else if (r.kind === 'created') {
+        if (existsSync(r.file_path)) moveToTrash(workRoot, [r.file_path])
+      } else if (r.trash_path) {
+        restoreTrashedPath(workRoot, r.trash_path)
+      }
+      result.restored.push(path)
+    } catch (error) {
+      result.skipped.push({ path, reason: (error as Error).message })
+    }
+  }
+  db.prepare(
+    'UPDATE snapshots SET restored_at = ? WHERE message_id = ? AND restored_at IS NULL'
+  ).run(Date.now(), messageId)
+  return result
+}
+
+const MAX_DIFF_BYTES = 1024 * 1024
+
+function readText(read: () => Buffer): string | null {
+  const bytes = read()
+  if (bytes.length > MAX_DIFF_BYTES) return null
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 変更前後の内容（差分表示用。SEC-15）。テキストでない・大きすぎる場合は null
+ */
+export function snapshotDiff(
+  db: Database.Database,
+  snapshotsDir: string,
+  workRoot: string,
+  snapshotId: string
+): { path: string; before: string | null; after: string | null; binary: boolean } | null {
+  const r = getSnapshot(db, snapshotId)
+  if (!r) return null
+  const before =
+    r.kind === 'modified'
+      ? readText(() => readSnapshotContent(snapshotsDir, r))
+      : r.kind === 'created'
+        ? ''
+        : null
+  const after = existsSync(r.file_path) ? readText(() => readFileSync(r.file_path)) : ''
+  return {
+    path: relative(workRoot, r.file_path),
+    before,
+    after,
+    binary: before === null || after === null
+  }
 }

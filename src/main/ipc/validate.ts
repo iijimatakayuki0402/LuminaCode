@@ -8,13 +8,17 @@ import { ACCENTS, MODES } from '@shared/theme'
 import type {
   Appearance,
   ChatPrefs,
+  CoworkPrefs,
   CreateProjectInput,
   EditAndResendInput,
   ListProjectsOptions,
   CreateThreadInput,
   PermissionMode,
   ProjectType,
+  PermissionResponse,
   SendMessageInput,
+  ToolCategory,
+  ToolEventFilter,
   UpdateProjectInput,
   UpdateThreadInput
 } from '@shared/types'
@@ -134,6 +138,39 @@ export const editAndResendInput = object<EditAndResendInput>({
 
 export const chatPrefsInput = object<Partial<ChatPrefs>>({
   sendKey: optional(oneOf(['enter', 'ctrl_enter'] as const))
+})
+
+export const permissionResponse = oneOf<PermissionResponse>(['once', 'thread', 'project', 'deny'])
+export const scope = oneOf(['thread', 'project'] as const)
+export const exportFormat = oneOf(['csv', 'json'] as const)
+
+const toolCategory = oneOf<ToolCategory>([
+  'read',
+  'write',
+  'delete',
+  'command',
+  'plan',
+  'web',
+  'other'
+])
+
+export const num: Check<number> = (value, name) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : fail(name, '数値')
+
+export const toolEventFilter = object<ToolEventFilter>({
+  projectId: optional(id),
+  category: optional(toolCategory),
+  query: optional(str),
+  from: optional(num),
+  to: optional(num),
+  limit: optional(num)
+})
+
+const strings = array(str, 200)
+
+export const coworkPrefsInput = object<Partial<CoworkPrefs>>({
+  denyPatterns: optional(strings),
+  allowCommands: optional(strings)
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

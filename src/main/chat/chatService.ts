@@ -301,10 +301,14 @@ export class ChatService {
       model
     })
     const controller = new AbortController()
-    const done = this.generate(project, threadId, assistant.id, model, controller.signal)
+    const entry = { controller, done: Promise.resolve() }
+    entry.done = this.generate(project, threadId, assistant.id, model, controller.signal)
       .catch((error) => console.error('[chat] unexpected failure:', (error as Error).name))
-      .finally(() => this.running.delete(threadId))
-    this.running.set(threadId, { controller, done })
+      // 完了の通知の後に次の生成が始まっていれば、そちらは消さない
+      .finally(() => {
+        if (this.running.get(threadId) === entry) this.running.delete(threadId)
+      })
+    this.running.set(threadId, entry)
     return this.getPublic(assistant.id)
   }
 
@@ -508,6 +512,8 @@ export class ChatService {
       estimated_cost: cost
     })
     const message = this.getPublic(assistantId)
+    // 完了の通知を受けてすぐ次の操作ができるよう、通知より先に「生成中」を解除する
+    this.running.delete(message.thread_id)
     const errorMessage = errorKind ? API_ERROR_MESSAGES[errorKind] : null
     this.deps.emit({ type: 'finished', threadId: message.thread_id, message, errorMessage })
   }
@@ -531,8 +537,9 @@ export class ChatService {
   }
 
   private toPublic(record: ops.MessageRecord, attachments: ops.AttachmentRecord[]): Message {
-    const { content_blocks: _blocks, ...rest } = record
+    const { content_blocks: _blocks, agent_resume_uuid: _resume, ...rest } = record
     void _blocks
+    void _resume
     return { ...rest, thinking: thinkingOf(record), attachments: attachments.map(toInfo) }
   }
 }

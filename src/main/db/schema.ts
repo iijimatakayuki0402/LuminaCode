@@ -225,6 +225,31 @@ export const MIGRATIONS: Migration[] = [
       'ALTER TABLE messages ADD COLUMN error_kind TEXT',
       'CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status)'
     ]
+  },
+  {
+    // Cowork（Stage 6）
+    //   threads.agent_session_id:   Agent SDK のセッション ID（次の実行で再開する）
+    //   messages.agent_resume_uuid: その応答の最後のエントリ（編集・再送信でここまで巻き戻して再開する）
+    //   tool_events:                実行（応答メッセージ）単位でまとめ、結果と完了日時を記録する（LOG-01）
+    //   snapshots:                  実行単位の一括 Undo のため、種別と退避先を記録する（SEC-14、SEC-15）
+    //                               modified: 変更前の内容 / created: 新規作成（Undo で退避）/ trashed: 削除（退避）
+    version: 3,
+    statements: [
+      'ALTER TABLE threads ADD COLUMN agent_session_id TEXT',
+      'ALTER TABLE messages ADD COLUMN agent_resume_uuid TEXT',
+      'ALTER TABLE tool_events ADD COLUMN message_id TEXT',
+      'ALTER TABLE tool_events ADD COLUMN tool_use_id TEXT',
+      'ALTER TABLE tool_events ADD COLUMN category TEXT',
+      'ALTER TABLE tool_events ADD COLUMN finished_at INTEGER',
+      'CREATE INDEX IF NOT EXISTS idx_tool_events_message ON tool_events(message_id)',
+      'CREATE INDEX IF NOT EXISTS idx_tool_events_use ON tool_events(tool_use_id)',
+      'ALTER TABLE snapshots ADD COLUMN message_id TEXT',
+      `ALTER TABLE snapshots ADD COLUMN kind TEXT NOT NULL DEFAULT 'modified'
+         CHECK(kind IN ('modified', 'created', 'trashed'))`,
+      'ALTER TABLE snapshots ADD COLUMN trash_path TEXT',
+      'ALTER TABLE snapshots ADD COLUMN restored_at INTEGER',
+      'CREATE INDEX IF NOT EXISTS idx_snapshots_message ON snapshots(message_id)'
+    ]
   }
 ]
 

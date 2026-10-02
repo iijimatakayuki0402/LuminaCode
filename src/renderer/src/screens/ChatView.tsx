@@ -79,6 +79,7 @@ export function ChatView({
         if (event.errorMessage) setError(event.errorMessage)
         return
       }
+      if (event.type !== 'text' && event.type !== 'thinking' && event.type !== 'retrying') return
       setLive((map) => {
         const current = map[event.messageId] ?? { text: '', thinking: '', retry: null }
         const next =

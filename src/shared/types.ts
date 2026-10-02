@@ -198,6 +198,130 @@ export type ChatEvent =
       message: string
     }
   | { type: 'finished'; threadId: string; message: Message; errorMessage: string | null }
+  /** Cowork: ツール実行の開始・完了（COW-05） */
+  | { type: 'tool'; threadId: string; messageId: string; event: ToolEventInfo }
+  /** Cowork: 確認ダイアログの依頼（6.7、SEC-12） */
+  | { type: 'permission'; threadId: string; request: PermissionRequest }
+  /** Cowork: todo の更新（COW-13） */
+  | { type: 'todos'; threadId: string; messageId: string; todos: TodoItem[] }
+
+// ========================================
+// Cowork（要件 6.5、6.7、9 章）
+// ========================================
+
+/** ツールの種別（権限判定と操作ログの絞り込みに使う） */
+export type ToolCategory = 'read' | 'write' | 'delete' | 'command' | 'plan' | 'web' | 'other'
+
+export type PermissionMethod =
+  'auto' | 'allowed_once' | 'allowed_always_thread' | 'allowed_always_project' | 'denied'
+
+/** 操作ログの 1 件（LOG-01） */
+export interface ToolEventInfo {
+  id: string
+  thread_id: string
+  message_id: string | null
+  tool_use_id: string | null
+  tool_name: string
+  category: ToolCategory | null
+  /** 対象のパス（作業フォルダからの相対パス）や検索パターン */
+  target: string | null
+  command: string | null
+  /** 結果の要約（エラー時はエラー内容） */
+  result: string | null
+  permission_method: PermissionMethod
+  created_at: number
+  finished_at: number | null
+}
+
+export interface PermissionTarget {
+  /** 作業フォルダからの相対パス */
+  path: string
+  kind: 'file' | 'folder' | 'missing'
+  size_bytes: number | null
+}
+
+/** 確認ダイアログの依頼（SEC-12: 対象の一覧を示す） */
+export interface PermissionRequest {
+  requestId: string
+  threadId: string
+  toolName: string
+  category: ToolCategory
+  targets: PermissionTarget[]
+  command: string | null
+  /** 編集内容の概要（書き込み・編集） */
+  detail: string | null
+  /** SEC-04 などの専用確認の理由 */
+  danger: string | null
+  /** 「常に許可」を選べるか（SEC-13 の多数・フォルダ削除では選べない） */
+  offerAlways: boolean
+}
+
+export type PermissionResponse = 'once' | 'thread' | 'project' | 'deny'
+
+export interface TodoItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  activeForm: string
+}
+
+/** 実行単位の変更（SEC-15） */
+export interface FileChange {
+  snapshotId: string
+  /** 作業フォルダからの相対パス */
+  path: string
+  kind: 'modified' | 'created' | 'trashed'
+  restored: boolean
+}
+
+export interface TrashEntry {
+  /** .lumina-trash からの相対パス（<日時>\<元の相対パス>） */
+  id: string
+  originalPath: string
+  deletedAt: number
+  isFolder: boolean
+  size_bytes: number
+}
+
+export interface AlwaysAllowRules {
+  thread: ToolCategory[]
+  project: ToolCategory[]
+}
+
+export interface UndoResult {
+  restored: string[]
+  skipped: { path: string; reason: string }[]
+}
+
+export interface FileDiff {
+  path: string
+  before: string | null
+  after: string | null
+  /** テキストでない・大きすぎるため内容を表示できない */
+  binary: boolean
+}
+
+export interface ToolEventFilter {
+  projectId?: string
+  category?: ToolCategory
+  /** 対象パス・コマンドの部分一致 */
+  query?: string
+  from?: number
+  to?: number
+  limit?: number
+}
+
+export interface ToolEventRow extends ToolEventInfo {
+  project_id: string
+  project_name: string
+  thread_title: string | null
+}
+
+export interface CoworkPrefs {
+  /** コマンドの拒否リスト（正規表現。SEC-22） */
+  denyPatterns: string[]
+  /** 事前に許可するコマンド（SEC-23） */
+  allowCommands: string[]
+}
 
 // ========================================
 // API キー・モデル（要件 6.8）

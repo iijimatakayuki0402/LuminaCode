@@ -4,22 +4,32 @@
  */
 
 import type {
+  AlwaysAllowRules,
   ApiErrorKind,
   ApiKeyStatus,
   Appearance,
   ChatEvent,
   ChatPrefs,
+  CoworkPrefs,
   EditAndResendInput,
+  FileChange,
+  FileDiff,
   CreateProjectInput,
   CreateThreadInput,
   ListProjectsOptions,
   Message,
   ModelList,
+  PermissionResponse,
   Project,
   SendMessageInput,
   SendResult,
   StageResult,
   Thread,
+  ToolEventFilter,
+  ToolEventInfo,
+  ToolEventRow,
+  TrashEntry,
+  UndoResult,
   UpdateProjectInput,
   UpdateThreadInput
 } from './types'
@@ -71,6 +81,30 @@ export interface IpcContract {
   'chat:regenerate': { args: [userMessageId: string]; result: Message }
   'chat:editAndResend': { args: [input: EditAndResendInput]; result: SendResult }
   'chat:stop': { args: [threadId: string]; result: void }
+
+  /** Cowork: 確認ダイアログへの回答 */
+  'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
+  'cowork:toolEvents': { args: [threadId: string]; result: ToolEventInfo[] }
+  /** Cowork: 実行（応答メッセージ）単位の変更の一覧と一括 Undo（SEC-15） */
+  'cowork:changes': { args: [messageId: string]; result: FileChange[] }
+  'cowork:undo': { args: [messageId: string]; result: UndoResult }
+  'cowork:diff': { args: [snapshotId: string]; result: FileDiff | null }
+  /** Cowork: 退避先（SEC-11） */
+  'cowork:trashList': { args: [projectId: string]; result: TrashEntry[] }
+  'cowork:trashRestore': { args: [projectId: string, entryId: string]; result: string }
+  'cowork:trashPurge': { args: [projectId: string, olderThanDays: number]; result: number }
+  /** Cowork: 常に許可（6.7: 設定画面から解除できる） */
+  'cowork:getAlways': { args: [projectId: string, threadId?: string]; result: AlwaysAllowRules }
+  'cowork:clearAlways': { args: [scope: 'thread' | 'project', id: string]; result: void }
+  /** Cowork: コマンドの拒否リスト・許可リスト（SEC-22、SEC-23） */
+  'cowork:getPrefs': { args: []; result: CoworkPrefs }
+  'cowork:setPrefs': { args: [input: Partial<CoworkPrefs>]; result: CoworkPrefs }
+
+  /** 操作ログ（LOG-02、LOG-03） */
+  'logs:search': { args: [filter: ToolEventFilter]; result: ToolEventRow[] }
+  /** 保存先を選んで書き出す（キャンセル時は null） */
+  'logs:export': { args: [filter: ToolEventFilter, format: 'csv' | 'json']; result: string | null }
+  'logs:deleteBefore': { args: [before: number]; result: number }
 
   /** ファイル選択ダイアログで選び、仮置きする */
   'attachments:select': { args: []; result: StageResult }
@@ -170,6 +204,25 @@ export interface LuminaApi {
     stop: Invoke<'chat:stop'>
     /** 生成中の通知を受け取る。戻り値で解除する */
     onEvent: (listener: (event: ChatEvent) => void) => () => void
+  }
+  cowork: {
+    respond: Invoke<'cowork:respond'>
+    toolEvents: Invoke<'cowork:toolEvents'>
+    changes: Invoke<'cowork:changes'>
+    undo: Invoke<'cowork:undo'>
+    diff: Invoke<'cowork:diff'>
+    trashList: Invoke<'cowork:trashList'>
+    trashRestore: Invoke<'cowork:trashRestore'>
+    trashPurge: Invoke<'cowork:trashPurge'>
+    getAlways: Invoke<'cowork:getAlways'>
+    clearAlways: Invoke<'cowork:clearAlways'>
+    getPrefs: Invoke<'cowork:getPrefs'>
+    setPrefs: Invoke<'cowork:setPrefs'>
+  }
+  logs: {
+    search: Invoke<'logs:search'>
+    export: Invoke<'logs:export'>
+    deleteBefore: Invoke<'logs:deleteBefore'>
   }
   attachments: {
     select: Invoke<'attachments:select'>

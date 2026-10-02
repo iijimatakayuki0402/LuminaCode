@@ -15,6 +15,7 @@ import { createHandlers, type IpcHandlers } from '../../src/main/ipc/handlers'
 import { invokeHandler } from '../../src/main/ipc/register'
 import { AttachmentStore } from '../../src/main/chat/attachments'
 import { ChatService } from '../../src/main/chat/chatService'
+import { CoworkService } from '../../src/main/cowork/coworkService'
 import { ModelService } from '../../src/main/models/modelService'
 import { ApiKeyStore, type SecretCipher } from '../../src/main/secrets/apiKeyStore'
 import { apiError, fakeClient } from '../helpers/fakeAnthropic'
@@ -37,6 +38,7 @@ let dir: string
 let keyFile: string
 let usedKeys: string[]
 let selectedFolder: string | null = null
+let saved: { name: string; content: string } | null = null
 
 const call = <T = unknown>(channel: IpcChannel, ...args: unknown[]): Promise<IpcResult<T>> =>
   invokeHandler(handlers, channel, true, args) as Promise<IpcResult<T>>
@@ -77,12 +79,26 @@ beforeEach(() => {
     emit: () => undefined
   })
 
+  const coworkService = new CoworkService({
+    db,
+    snapshotsDir: join(dir, 'snapshots'),
+    modelService,
+    getApiKey: () => apiKeyStore.get(),
+    configDir: join(dir, 'agent'),
+    emit: () => undefined
+  })
+
   handlers = createHandlers({
     db,
     apiKeyStore,
     modelService,
     createClient,
     chatService,
+    coworkService,
+    saveFile: async (name, content) => {
+      saved = { name, content }
+      return join(dir, name)
+    },
     attachments,
     selectFiles: async () => [],
     workFolderPolicy: {
@@ -425,6 +441,79 @@ describe('Stage 5: チャット・添付ファイルの引数検証', () => {
       sendKey: 'ctrl_enter'
     })
     expect(await call('settings:setChatPrefs', { sendKey: 'shift' })).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+  })
+})
+
+describe('Stage 6: Cowork・操作ログ', () => {
+  it('送信は Cowork に振り分ける（添付は受け付けない）', async () => {
+    mkdirSync(join(dir, 'work'))
+    const project = await value<Project>('projects:create', {
+      type: 'cowork',
+      name: 'C',
+      work_folder: join(dir, 'work')
+    })
+    const thread = await value<Thread>('threads:create', { project_id: project.id })
+    await value('apiKey:save', VALID_KEY)
+    expect(
+      await call('chat:send', { threadId: thread.id, content: 'x', attachmentIds: ['a'] })
+    ).toMatchObject({ error: { code: 'validation', message: expect.stringContaining('Cowork') } })
+    expect(await value('cowork:trashList', project.id)).toEqual([])
+    expect(await value('cowork:getAlways', project.id, thread.id)).toEqual({
+      thread: [],
+      project: []
+    })
+  })
+
+  it('通常チャットのプロジェクトでは退避先を扱えない', async () => {
+    const project = await value<Project>('projects:create', { type: 'chat', name: 'P' })
+    expect(await call('cowork:trashList', project.id)).toMatchObject({
+      error: { code: 'validation' }
+    })
+  })
+
+  it('操作ログを検索・書き出し・削除できる（LOG-02、LOG-03）', async () => {
+    mkdirSync(join(dir, 'work2'))
+    const project = await value<Project>('projects:create', {
+      type: 'cowork',
+      name: 'ログ',
+      work_folder: join(dir, 'work2')
+    })
+    const thread = await value<Thread>('threads:create', { project_id: project.id })
+    const now = Date.now()
+    for (const [i, category, target] of [
+      [0, 'read', 'a.txt'],
+      [1, 'write', '=cmd.txt'],
+      [2, 'command', null]
+    ] as const) {
+      db.prepare(
+        `INSERT INTO tool_events (id, thread_id, tool_name, category, target, command, permission_method, created_at)
+         VALUES (?, ?, 'T', ?, ?, ?, 'auto', ?)`
+      ).run(
+        `e${i}`,
+        thread.id,
+        category,
+        target,
+        category === 'command' ? 'npm test' : null,
+        now - i * 1000
+      )
+    }
+
+    expect(await value<unknown[]>('logs:search', {})).toHaveLength(3)
+    expect(await value('logs:search', { category: 'write' })).toMatchObject([
+      { id: 'e1', project_name: 'ログ' }
+    ])
+    expect(await value('logs:search', { query: 'npm' })).toMatchObject([{ id: 'e2' }])
+
+    expect(await value('logs:export', {}, 'csv')).toContain('.csv')
+    expect(saved!.content.startsWith('\ufeffcreated_at,project_name')).toBe(true)
+    // 数式として解釈されないようにする
+    expect(saved!.content).toContain("'=cmd.txt")
+
+    expect(await value('logs:deleteBefore', now - 500)).toBe(2)
+    expect(await value<unknown[]>('logs:search', {})).toHaveLength(1)
+    expect(await call('logs:search', { category: 'nope' })).toMatchObject({
       error: { code: 'invalid_argument' }
     })
   })

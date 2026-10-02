@@ -15,6 +15,9 @@ import { getAppearance, setAppearance } from '../settings/appearance'
 import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
 import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
+import type { CoworkService } from '../cowork/coworkService'
+import { listTrash, purgeTrash, restoreFromTrash } from '../cowork/trash'
+import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
 import type { AttachmentInfo, StageResult } from '@shared/types'
 import { NotFoundError } from './errors'
 import * as v from './validate'
@@ -35,7 +38,10 @@ export interface HandlerDeps {
   /** ファイル選択ダイアログを表示する（複数選択。キャンセル時は空） */
   selectFiles: () => Promise<string[]>
   chatService: ChatService
+  coworkService: CoworkService
   attachments: AttachmentStore
+  /** 保存ダイアログで保存先を選び、内容を書き込む（キャンセル時は null） */
+  saveFile: (defaultName: string, content: string) => Promise<string | null>
 }
 
 /** 複数ファイルを仮置きし、失敗したものは理由をまとめて返す */
@@ -75,8 +81,28 @@ export function createHandlers({
   selectFolder,
   selectFiles,
   chatService,
-  attachments
+  coworkService,
+  attachments,
+  saveFile
 }: HandlerDeps): IpcHandlers {
+  // 通常チャットと Cowork の振り分け（スレッドが属するプロジェクトの種別で決める）
+  const engineForThread = (threadId: string): ChatService | CoworkService => {
+    const thread = found(ops.getThread(db, threadId), THREAD_NOT_FOUND)
+    const project = found(ops.getProject(db, thread.project_id), PROJECT_NOT_FOUND)
+    return project.type === 'cowork' ? coworkService : chatService
+  }
+  const engineForMessage = (messageId: string): ChatService | CoworkService => {
+    const message = found(ops.getMessage(db, messageId), 'メッセージが見つかりません。')
+    return engineForThread(message.thread_id)
+  }
+  const workFolderOf = (projectId: string): string => {
+    const project = found(ops.getProject(db, projectId), PROJECT_NOT_FOUND)
+    if (project.type !== 'cowork' || !project.work_folder) {
+      throw new ops.ValidationError('Cowork のプロジェクトではありません。')
+    }
+    return project.work_folder
+  }
+
   // 作業フォルダは要件 PRJ-05 の検証を通し、実体パスで保存する
   const checkWorkFolder = <T extends { work_folder?: string }>(input: T): T =>
     input.work_folder
@@ -154,12 +180,58 @@ export function createHandlers({
     'settings:getChatPrefs': () => getChatPrefs(db),
     'settings:setChatPrefs': (input) => setChatPrefs(db, v.chatPrefsInput(input, 'input')),
 
-    'chat:send': (input) => chatService.send(v.sendMessageInput(input, 'input')),
-    'chat:regenerate': (userMessageId) =>
-      chatService.regenerate(v.id(userMessageId, 'userMessageId')),
-    'chat:editAndResend': (input) =>
-      chatService.editAndResend(v.editAndResendInput(input, 'input')),
-    'chat:stop': (threadId) => chatService.stop(v.id(threadId, 'threadId')),
+    'chat:send': (input) => {
+      const checked = v.sendMessageInput(input, 'input')
+      return engineForThread(checked.threadId).send(checked)
+    },
+    'chat:regenerate': (userMessageId) => {
+      const messageId = v.id(userMessageId, 'userMessageId')
+      return engineForMessage(messageId).regenerate(messageId)
+    },
+    'chat:editAndResend': (input) => {
+      const checked = v.editAndResendInput(input, 'input')
+      return engineForMessage(checked.userMessageId).editAndResend(checked)
+    },
+    'chat:stop': (threadId) => {
+      const checked = v.id(threadId, 'threadId')
+      engineForThread(checked).stop(checked)
+    },
+
+    'cowork:respond': (requestId, response) =>
+      coworkService.respond(
+        v.id(requestId, 'requestId'),
+        v.permissionResponse(response, 'response')
+      ),
+    'cowork:toolEvents': (threadId) => coworkService.listToolEvents(v.id(threadId, 'threadId')),
+    'cowork:changes': (messageId) => coworkService.listChanges(v.id(messageId, 'messageId')),
+    'cowork:undo': (messageId) => coworkService.undo(v.id(messageId, 'messageId')),
+    'cowork:diff': (snapshotId) => coworkService.diff(v.id(snapshotId, 'snapshotId')),
+    'cowork:trashList': (projectId) => listTrash(workFolderOf(v.id(projectId, 'projectId'))),
+    'cowork:trashRestore': (projectId, entryId) =>
+      restoreFromTrash(workFolderOf(v.id(projectId, 'projectId')), v.str(entryId, 'entryId')),
+    'cowork:trashPurge': (projectId, days) =>
+      purgeTrash(workFolderOf(v.id(projectId, 'projectId')), v.num(days, 'olderThanDays')),
+    'cowork:getAlways': (projectId, threadId) =>
+      coworkService.getAlways(
+        v.id(projectId, 'projectId'),
+        v.optional(v.id)(threadId, 'threadId') ?? ''
+      ),
+    'cowork:clearAlways': (scope, id) =>
+      coworkService.clearAlways(v.scope(scope, 'scope'), v.id(id, 'id')),
+    'cowork:getPrefs': () => coworkService.getPrefs(),
+    'cowork:setPrefs': (input) => coworkService.setPrefs(v.coworkPrefsInput(input, 'input')),
+
+    'logs:search': (filter) => searchToolEvents(db, v.toolEventFilter(filter, 'filter')),
+    'logs:export': (filter, format) => {
+      const checkedFormat = v.exportFormat(format, 'format')
+      const rows = searchToolEvents(db, { ...v.toolEventFilter(filter, 'filter'), limit: 100_000 })
+      const date = new Date().toISOString().slice(0, 10)
+      return saveFile(
+        `lumina-tool-log-${date}.${checkedFormat}`,
+        formatToolEvents(rows, checkedFormat)
+      )
+    },
+    'logs:deleteBefore': (before) => deleteToolEventsBefore(db, v.num(before, 'before')),
 
     'attachments:select': async () =>
       stageAll((await selectFiles()).map((p) => () => attachments.stageFromPath(p))),

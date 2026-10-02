@@ -467,4 +467,26 @@ describe('activePath', () => {
     expect(activePath(nodes).map((n) => n.id)).toEqual(['q1', 'a1', 'q2b', 'a2b'])
     expect(activePath([])).toEqual([])
   })
+
+  it('完了の通知を受けてすぐに次を送信できる', async () => {
+    setup([{ chunks: ['A1'] }, { chunks: ['A2'] }])
+    let followUp: unknown = 'not called'
+    const deps = (service as unknown as { deps: { emit: (e: ChatEvent) => void } }).deps
+    const base = deps.emit
+    deps.emit = (e) => {
+      base(e)
+      if (e.type === 'finished' && followUp === 'not called') {
+        try {
+          service.send({ threadId, content: 'Q2', attachmentIds: [] })
+          followUp = null
+        } catch (error) {
+          followUp = error
+        }
+      }
+    }
+    await sendAndWait('Q1')
+    await service.whenIdle(threadId)
+    expect(followUp).toBeNull()
+    expect(path().map((m) => m.content)).toEqual(['Q1', 'A1', 'Q2', 'A2'])
+  })
 })

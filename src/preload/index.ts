@@ -73,6 +73,25 @@ const api: LuminaApi = {
       return () => ipcRenderer.removeListener(CHAT_EVENT_CHANNEL, handler)
     }
   },
+  cowork: {
+    respond: invoke('cowork:respond'),
+    toolEvents: invoke('cowork:toolEvents'),
+    changes: invoke('cowork:changes'),
+    undo: invoke('cowork:undo'),
+    diff: invoke('cowork:diff'),
+    trashList: invoke('cowork:trashList'),
+    trashRestore: invoke('cowork:trashRestore'),
+    trashPurge: invoke('cowork:trashPurge'),
+    getAlways: invoke('cowork:getAlways'),
+    clearAlways: invoke('cowork:clearAlways'),
+    getPrefs: invoke('cowork:getPrefs'),
+    setPrefs: invoke('cowork:setPrefs')
+  },
+  logs: {
+    search: invoke('logs:search'),
+    export: invoke('logs:export'),
+    deleteBefore: invoke('logs:deleteBefore')
+  },
   attachments: {
     select: invoke('attachments:select'),
     stagePaths: invoke('attachments:stagePaths'),
