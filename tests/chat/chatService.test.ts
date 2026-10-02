@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activePath } from '../../src/shared/conversation'
+import { activePath, leafFrom, siblingsOf } from '../../src/shared/conversation'
 import type { ChatEvent, Message } from '../../src/shared/types'
 import { AttachmentStore } from '../../src/main/chat/attachments'
 import { ChatService, MAX_RETRIES } from '../../src/main/chat/chatService'
@@ -52,7 +52,8 @@ beforeEach(() => {
           created_at: '2026-01-01',
           max_input_tokens: 1e6,
           max_tokens: 128000,
-          supports_adaptive_thinking: true
+          supports_adaptive_thinking: true,
+          effort_levels: ['low', 'medium', 'high']
         },
         {
           id: LEGACY,
@@ -60,7 +61,8 @@ beforeEach(() => {
           created_at: '2025-01-01',
           max_input_tokens: 2e5,
           max_tokens: 8192,
-          supports_adaptive_thinking: false
+          supports_adaptive_thinking: false,
+          effort_levels: []
         }
       ]
     })
@@ -100,7 +102,8 @@ afterEach(async () => {
 const finished = (): Extract<ChatEvent, { type: 'finished' }>[] =>
   events.filter((e): e is Extract<ChatEvent, { type: 'finished' }> => e.type === 'finished')
 
-const path = (): Message[] => activePath(service.listMessages(threadId))
+const path = (): Message[] =>
+  activePath(service.listMessages(threadId), ops.getThread(db, threadId)?.active_leaf_id)
 
 async function sendAndWait(content: string, attachmentIds: string[] = []): Promise<Message> {
   const { assistantMessage } = service.send({ threadId, content, attachmentIds })
@@ -201,7 +204,7 @@ describe('送信とストリーミング（CHT-02、CHT-03）', () => {
     expect(fake.calls[0]).toMatchObject({
       model: ADAPTIVE,
       max_tokens: 64000,
-      system: '丁寧に答えて',
+      system: '# プロジェクトのカスタム指示\n丁寧に答えて',
       cache_control: { type: 'ephemeral' },
       thinking: {
         type: 'adaptive',
@@ -348,19 +351,53 @@ describe('編集して再送信（CHT-14）', () => {
     expect(fake.calls[2].messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
   })
 
-  it('最新以外のメッセージは編集できない', async () => {
-    setup([{ chunks: ['A1'] }, { chunks: ['A2'] }])
+  it('最新以外のメッセージも編集でき、その位置から分岐する（CHT-06）', async () => {
+    setup([{ chunks: ['A1'] }, { chunks: ['A2'] }, { chunks: ['A1改'] }])
     await sendAndWait('Q1')
     await sendAndWait('Q2')
 
-    expect(() =>
-      service.editAndResend({
-        userMessageId: path()[0].id,
-        content: 'x',
-        keepAttachmentIds: [],
-        attachmentIds: []
-      })
-    ).toThrow('最新')
+    service.editAndResend({
+      userMessageId: path()[0].id,
+      content: 'Q1改',
+      keepAttachmentIds: [],
+      attachmentIds: []
+    })
+    await service.whenIdle(threadId)
+
+    expect(path().map((m) => m.content)).toEqual(['Q1改', 'A1改'])
+    expect(fake.calls[2].messages).toHaveLength(1)
+  })
+
+  it('表示中の分岐に戻すと、その続きから送信できる（CHT-06）', async () => {
+    setup([{ chunks: ['A1'] }, { chunks: ['A1改'] }, { chunks: ['続き'] }])
+    await sendAndWait('Q1')
+    const first = path()
+    service.editAndResend({
+      userMessageId: first[0].id,
+      content: 'Q1改',
+      keepAttachmentIds: [],
+      attachmentIds: []
+    })
+    await service.whenIdle(threadId)
+
+    // 元の分岐に戻す
+    const records = ops.listMessagesByThread(db, threadId)
+    ops.updateThread(db, threadId, { active_leaf_id: leafFrom(records, first[0].id) })
+    expect(path().map((m) => m.content)).toEqual(['Q1', 'A1'])
+    const { siblings, index } = siblingsOf(service.listMessages(threadId), path()[0])
+    expect([siblings.length, index]).toEqual([2, 0])
+
+    await sendAndWait('Q2')
+    expect(path().map((m) => m.content)).toEqual(['Q1', 'A1', 'Q2', '続き'])
+    expect(fake.calls[2].messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+  })
+
+  it('完了した応答も再生成できる（CHT-06）', async () => {
+    setup([{ chunks: ['A1'] }, { chunks: ['A1再'] }])
+    await sendAndWait('Q1')
+    service.regenerate(path()[0].id)
+    await service.whenIdle(threadId)
+    expect(path().map((m) => m.content)).toEqual(['Q1', 'A1再'])
   })
 
   it('添付ファイルを残す・外す・追加することができる', async () => {
@@ -488,5 +525,74 @@ describe('activePath', () => {
     await service.whenIdle(threadId)
     expect(followUp).toBeNull()
     expect(path().map((m) => m.content)).toEqual(['Q1', 'A1', 'Q2', 'A2'])
+  })
+})
+
+describe('思考量・共通の指示・要約・タイトル（Phase 2）', () => {
+  it('思考量はモデルが対応している場合だけ指定する（CHT-07）', async () => {
+    setup([{ chunks: ['a'] }, { chunks: ['b'] }])
+    ops.updateThread(db, threadId, { effort: 'low' })
+    await sendAndWait('Q1')
+    expect(fake.calls[0].output_config).toEqual({ effort: 'low' })
+
+    ops.updateThread(db, threadId, { effort: 'max' })
+    await sendAndWait('Q2')
+    expect(fake.calls[1]).not.toHaveProperty('output_config')
+  })
+
+  it('共通のカスタム指示 → プロジェクトの順に結合する（PRJ-08）', async () => {
+    const service2 = new ChatService({
+      db,
+      attachments,
+      modelService: new ModelService(db, () => null),
+      getApiKey: () => 'sk-test',
+      createClient: () => fake.client,
+      emit: () => undefined,
+      getGlobalInstructions: () => '必ず敬語で',
+      flushIntervalMs: 1
+    })
+    service2.send({ threadId, content: 'Q', attachmentIds: [] })
+    await service2.whenIdle(threadId)
+    const system = String(fake.calls[0].system)
+    expect(system.indexOf('必ず敬語で')).toBeLessThan(system.indexOf('丁寧に答えて'))
+  })
+
+  it('要約して新しいスレッドで続ける（CTX-02）', async () => {
+    setup([{ chunks: ['A1'] }, { chunks: ['これまでの要約'] }, { chunks: ['続きの回答'] }])
+    await sendAndWait('Q1')
+    const next = await service.compact(threadId)
+
+    expect(next).toMatchObject({ context_summary: 'これまでの要約', project_id: projectId })
+    expect(next.title).toContain('（続き）')
+    // 要約の依頼は会話の最後にユーザーとして加える
+    expect(fake.calls[1].messages.at(-1)!.role).toBe('user')
+
+    service.send({ threadId: next.id, content: 'Q2', attachmentIds: [] })
+    await service.whenIdle(next.id)
+    expect(String(fake.calls[2].system)).toContain('これまでの要約')
+    expect(fake.calls[2].messages).toHaveLength(1)
+  })
+
+  it('最初のやり取りの完了後にだけタイトルの自動生成を依頼する（THR-03）', async () => {
+    const generate = vi.fn(async () => undefined)
+    const service2 = new ChatService({
+      db,
+      attachments,
+      modelService: new ModelService(db, () => null),
+      getApiKey: () => 'sk-test',
+      createClient: () => fake.client,
+      emit: () => undefined,
+      titles: { generate },
+      flushIntervalMs: 1
+    })
+    setup([{ chunks: ['A1'] }, { chunks: ['A2'] }])
+    service2.send({ threadId, content: '旅行の計画', attachmentIds: [] })
+    await service2.whenIdle(threadId)
+    service2.send({ threadId, content: '次', attachmentIds: [] })
+    await service2.whenIdle(threadId)
+
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(generate).toHaveBeenCalledWith(threadId, '旅行の計画', 'A1', ADAPTIVE)
+    expect(ops.getThread(db, threadId)!.title_source).toBe('auto')
   })
 })

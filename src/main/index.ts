@@ -4,9 +4,12 @@ import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
 import { CHAT_EVENT_CHANNEL } from '@shared/ipc'
+import type { ChatEvent } from '@shared/types'
 import { createAnthropicClient } from './api/client'
 import { AttachmentStore } from './chat/attachments'
 import { ChatService } from './chat/chatService'
+import { TitleGenerator } from './chat/titleGenerator'
+import { getGlobalInstructions } from './settings/instructions'
 import { CoworkService } from './cowork/coworkService'
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
@@ -128,17 +131,30 @@ function setupBackend(): boolean {
   // USG-05: 単価表は %APPDATA%\LuminaCode\pricing.json で更新できる
   const usage = new UsageService(db, join(app.getPath('userData'), 'pricing.json'))
 
+  const emitToAll = (event: ChatEvent): void => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send(CHAT_EVENT_CHANNEL, event)
+  }
+  // THR-03: スレッドのタイトルを自動生成する
+  const titles = new TitleGenerator({
+    db,
+    modelService,
+    getApiKey: () => apiKeyStore.get(),
+    createClient: createAnthropicClient,
+    usage,
+    emit: emitToAll
+  })
+  const globalInstructions = (): string => getGlobalInstructions(db)
+
   chatService = new ChatService({
     db,
     usage,
+    titles,
+    getGlobalInstructions: globalInstructions,
     attachments,
     modelService,
     getApiKey: () => apiKeyStore.get(),
     createClient: createAnthropicClient,
-    emit: (event) => {
-      for (const win of BrowserWindow.getAllWindows())
-        win.webContents.send(CHAT_EVENT_CHANNEL, event)
-    }
+    emit: emitToAll
   })
   // モデル一覧が古い・無い場合は、起動時に裏で更新する（既定モデルの設定にも必要）
   if (apiKeyStore.get() !== null) void modelService.list().catch(() => undefined)
@@ -146,15 +162,14 @@ function setupBackend(): boolean {
   coworkService = new CoworkService({
     db,
     usage,
+    titles,
+    getGlobalInstructions: globalInstructions,
     snapshotsDir: getSnapshotsDir(),
     modelService,
     getApiKey: () => apiKeyStore.get(),
     configDir: join(app.getPath('userData'), 'agent'),
     executablePath: app.isPackaged ? resolveClaudeExecutable() : undefined,
-    emit: (event) => {
-      for (const win of BrowserWindow.getAllWindows())
-        win.webContents.send(CHAT_EVENT_CHANNEL, event)
-    }
+    emit: emitToAll
   })
 
   // LOG-03: 保持期間（90 日）を過ぎた操作ログを削除する

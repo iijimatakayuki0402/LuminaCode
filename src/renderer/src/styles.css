@@ -958,3 +958,47 @@ dialog.dialog.danger .dialog-head {
   border-bottom: 1px solid var(--border);
   padding: 0.3rem 0;
 }
+
+/* 分岐の切り替え（CHT-06）・コンテキスト（CTX-01） */
+.branch-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+.context-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.6rem;
+  background: var(--surface);
+}
+.context-bar.warn {
+  border-color: var(--hl-number);
+  color: var(--fg);
+}
+.summary-note {
+  border-left: 3px solid var(--accent);
+  padding: 0.4rem 0.6rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.summary-note summary {
+  cursor: pointer;
+}
+
+.thread-settings {
+  align-items: flex-end;
+  gap: 1rem;
+}
+.thread-settings .field {
+  margin-bottom: 0.5rem;
+}

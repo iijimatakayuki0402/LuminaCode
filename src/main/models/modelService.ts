@@ -6,7 +6,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type Database from 'better-sqlite3'
 import { pickDefaultModel } from '@shared/models'
-import type { ModelInfo, ModelList } from '@shared/types'
+import { EFFORT_LEVELS, type ModelInfo, type ModelList } from '@shared/types'
 import { toApiRequestError } from '../api/errors'
 import { getSetting, setSetting, ValidationError } from '../db/operations'
 
@@ -33,7 +33,10 @@ export async function fetchModels(client: Anthropic): Promise<ModelInfo[]> {
       created_at: m.created_at,
       max_input_tokens: m.max_input_tokens ?? null,
       max_tokens: m.max_tokens ?? null,
-      supports_adaptive_thinking: m.capabilities?.thinking?.types?.adaptive?.supported ?? false
+      supports_adaptive_thinking: m.capabilities?.thinking?.types?.adaptive?.supported ?? false,
+      effort_levels: m.capabilities?.effort?.supported
+        ? EFFORT_LEVELS.filter((level) => m.capabilities?.effort?.[level]?.supported)
+        : []
     })
   }
   return models
@@ -46,7 +49,9 @@ function readCache(db: Database.Database): ModelsCache | null {
     const cache = JSON.parse(raw) as ModelsCache
     if (!Array.isArray(cache.models) || typeof cache.fetched_at !== 'number') return null
     // 項目が足りない古い形式のキャッシュは、取得し直すまでの間だけ使う
-    const complete = cache.models.every((m) => typeof m.supports_adaptive_thinking === 'boolean')
+    const complete = cache.models.every(
+      (m) => typeof m.supports_adaptive_thinking === 'boolean' && Array.isArray(m.effort_levels)
+    )
     return complete ? cache : { ...cache, fetched_at: 0 }
   } catch {
     return null
@@ -87,6 +92,11 @@ export class ModelService {
       if (!cache) throw apiError
       return { models: cache.models, fetched_at: cache.fetched_at, stale: true }
     }
+  }
+
+  /** キャッシュ済みのモデル一覧（API は呼ばない） */
+  cachedModels(): ModelInfo[] {
+    return readCache(this.db)?.models ?? []
   }
 
   /** キャッシュ済みのモデル情報（チャットのリクエスト組み立て用） */

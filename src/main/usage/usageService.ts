@@ -204,6 +204,21 @@ export class UsageService {
   // 集計（USG-02）
   // ========================================
 
+  /**
+   * スレッドのコンテキスト使用量（CTX-01）: 直近の応答のリクエストで使ったトークン数
+   * 次のリクエストでは、それに応答の出力も加わるため、出力も含める
+   */
+  contextOf(threadId: string): { tokens: number; model: string | null } {
+    const row = this.db
+      .prepare(
+        `SELECT input_tokens + cache_read_tokens + cache_write_tokens + output_tokens AS tokens, model
+         FROM usage_records WHERE thread_id = ? AND message_id IS NOT NULL
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`
+      )
+      .get(threadId) as { tokens: number; model: string } | undefined
+    return { tokens: row?.tokens ?? 0, model: row?.model ?? null }
+  }
+
   threadTotals(threadId: string): UsageTotals {
     return this.totals('thread_id = ?', [threadId])
   }

@@ -140,7 +140,8 @@ describe('pickDefaultModel / resolveModel', () => {
     created_at,
     max_input_tokens: null,
     max_tokens: null,
-    supports_adaptive_thinking: false
+    supports_adaptive_thinking: false,
+    effort_levels: []
   })
 
   it('中位（Sonnet）が無ければ最新を選ぶ。空なら null', () => {

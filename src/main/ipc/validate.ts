@@ -5,6 +5,7 @@
  */
 
 import { ACCENTS, MODES } from '@shared/theme'
+import { EFFORT_LEVELS, type EffortLevel } from '@shared/types'
 import type {
   Appearance,
   ChatPrefs,
@@ -188,5 +189,6 @@ export const usageLimitsInput = object<Partial<UsageLimits>>({
 export const updateThreadInput = object<UpdateThreadInput>({
   title: optional(str),
   model: optional(str),
-  extended_thinking: optional(bool)
+  extended_thinking: optional(bool),
+  effort: optional(oneOf<EffortLevel | ''>([...EFFORT_LEVELS, '']))
 })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react'
 import { resolveModel } from '@shared/models'
 import type {
   AlwaysAllowRules,
+  EffortLevel,
   PermissionMode,
   Project,
   Thread,
@@ -44,6 +45,7 @@ export function ProjectScreen({
   const [message, setMessage] = useState<MessageState | null>(null)
   const { models, defaultModel } = useModels()
   const modelSelectId = useId()
+  const effortSelectId = useId()
 
   const fail = (e: unknown): void => setMessage({ tone: 'error', text: (e as Error).message })
 
@@ -110,6 +112,15 @@ export function ProjectScreen({
     }
   }
 
+  const changeEffort = async (thread: Thread, effort: EffortLevel | ''): Promise<void> => {
+    try {
+      await unwrap(window.lumina.threads.update(thread.id, { effort }))
+      await reload()
+    } catch (e) {
+      fail(e)
+    }
+  }
+
   const changeThreadModel = async (thread: Thread, model: string): Promise<void> => {
     try {
       await unwrap(window.lumina.threads.update(thread.id, { model }))
@@ -169,6 +180,10 @@ export function ProjectScreen({
   }
 
   const selected = threads?.find((t) => t.id === selectedId) ?? null
+  const activeModelInfo = models.find(
+    (m) => m.id === resolveModel(defaultModel, project.model, selected?.model ?? null)
+  )
+  const effortLevels = activeModelInfo?.effort_levels ?? []
   // MDL-03: スレッド → プロジェクト → 全体の既定
   const activeModel = resolveModel(defaultModel, project.model, selected?.model ?? null)
   const modelSource = selected?.model
@@ -322,33 +337,60 @@ export function ProjectScreen({
 
           {selected && (
             <>
-              <div className="field thread-model">
-                <label htmlFor={modelSelectId}>
-                  {threadTitle(selected)} — {ja.project.threadModel}
-                </label>
-                <select
-                  id={modelSelectId}
-                  className="select mono"
-                  value={selected.model ?? ''}
-                  onChange={(e) => void changeThreadModel(selected, e.target.value)}
-                >
-                  <option value="">
-                    {ja.project.inherit(resolveModel(defaultModel, project.model, null))}
-                  </option>
-                  {selected.model && !models.some((m) => m.id === selected.model) && (
-                    <option value={selected.model}>{selected.model}</option>
-                  )}
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.display_name} ({m.id})
+              <div className="row thread-settings">
+                <div className="field thread-model">
+                  <label htmlFor={modelSelectId}>
+                    {threadTitle(selected)} — {ja.project.threadModel}
+                  </label>
+                  <select
+                    id={modelSelectId}
+                    className="select mono"
+                    value={selected.model ?? ''}
+                    onChange={(e) => void changeThreadModel(selected, e.target.value)}
+                  >
+                    <option value="">
+                      {ja.project.inherit(resolveModel(defaultModel, project.model, null))}
                     </option>
-                  ))}
-                </select>
+                    {selected.model && !models.some((m) => m.id === selected.model) && (
+                      <option value={selected.model}>{selected.model}</option>
+                    )}
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.display_name} ({m.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {/* CHT-07: 思考量（モデルが対応している段階だけを選べる） */}
+                {effortLevels.length > 0 && (
+                  <div className="field">
+                    <label htmlFor={effortSelectId}>{ja.project.effort}</label>
+                    <select
+                      id={effortSelectId}
+                      className="select"
+                      title={ja.project.effortNote}
+                      value={selected.effort ?? ''}
+                      onChange={(e) =>
+                        void changeEffort(selected, e.target.value as EffortLevel | '')
+                      }
+                    >
+                      <option value="">{ja.project.effortDefault}</option>
+                      {effortLevels.map((level) => (
+                        <option key={level} value={level}>
+                          {ja.project.effortLevels[level]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <ChatView
                 threadId={selected.id}
                 cowork={project.type === 'cowork'}
                 onThreadChanged={() => void reload()}
+                onCompacted={(next) => {
+                  void reload().then(() => setSelectedId(next.id))
+                }}
               />
             </>
           )}

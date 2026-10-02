@@ -8,6 +8,10 @@ export type ProjectType = 'chat' | 'cowork'
 export type PermissionMode = 'confirm_each' | 'auto_edit' | 'plan_only'
 export type MessageRole = 'user' | 'assistant'
 
+/** 思考量（CHT-07。Messages API の output_config.effort） */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export const EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
 export interface Project {
   id: string
   type: ProjectType
@@ -31,6 +35,14 @@ export interface Thread {
   last_opened_at: number | null
   created_at: number
   updated_at: number
+  /** 表示中の分岐の末端（CHT-06） */
+  active_leaf_id: string | null
+  /** 思考量（CHT-07）。null はモデルの既定 */
+  effort: EffortLevel | null
+  /** 要約して続けたスレッドの、元の会話の要約（CTX-02） */
+  context_summary: string | null
+  /** タイトルの由来（THR-03） */
+  title_source: 'auto' | 'ai' | 'manual'
 }
 
 /**
@@ -132,6 +144,8 @@ export interface UpdateThreadInput {
   title?: string
   model?: string
   extended_thinking?: boolean
+  /** 空文字でモデルの既定に戻す */
+  effort?: EffortLevel | ''
 }
 
 export interface ListProjectsOptions {
@@ -206,6 +220,8 @@ export type ChatEvent =
   | { type: 'permission'; threadId: string; request: PermissionRequest }
   /** Cowork: todo の更新（COW-13） */
   | { type: 'todos'; threadId: string; messageId: string; todos: TodoItem[] }
+  /** スレッドのタイトルなどが更新された（THR-03 の自動生成） */
+  | { type: 'threadUpdated'; threadId: string }
 
 // ========================================
 // Cowork（要件 6.5、6.7、9 章）
@@ -339,6 +355,15 @@ export interface UsageTotals {
   requests: number
 }
 
+/** スレッドのコンテキスト使用量（CTX-01） */
+export interface ContextUsage {
+  /** 直近のリクエストで使ったトークン数（入力・キャッシュ・出力の合計）。未送信なら 0 */
+  tokens: number
+  /** モデルの入力上限。不明なら null */
+  limit: number | null
+  model: string | null
+}
+
 export interface UsageLimits {
   /** 月額上限（USD）。未設定は null（上限なし） */
   monthlyLimit: number | null
@@ -395,6 +420,8 @@ export interface ModelInfo {
   max_tokens: number | null
   /** adaptive thinking に対応しているか（Models API の capabilities から判定） */
   supports_adaptive_thinking: boolean
+  /** 指定できる思考量（CHT-07）。空なら指定できない */
+  effort_levels: EffortLevel[]
 }
 
 export interface ModelList {

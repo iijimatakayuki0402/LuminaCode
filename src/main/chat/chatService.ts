@@ -11,7 +11,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk'
 import type Database from 'better-sqlite3'
-import { activePath } from '@shared/conversation'
+import { activePath, pathTo } from '@shared/conversation'
 import { resolveModel } from '@shared/models'
 import type {
   AttachmentInfo,
@@ -27,6 +27,8 @@ import type { ClientFactory } from '../api/client'
 import { API_ERROR_MESSAGES, toApiRequestError } from '../api/errors'
 import * as ops from '../db/operations'
 import type { ModelService } from '../models/modelService'
+import { combineInstructions } from '../settings/instructions'
+import type { TitleGenerator } from './titleGenerator'
 import type { UsageService } from '../usage/usageService'
 import { ATTACHMENT_LIMITS, kindOfMime, toContentBlock, type AttachmentStore } from './attachments'
 import { estimateCost, type TokenUsage } from './pricing'
@@ -48,6 +50,10 @@ export interface ChatServiceDeps {
   getApiKey: () => string | null
   createClient: ClientFactory
   emit: (event: ChatEvent) => void
+  /** 全プロジェクト共通のカスタム指示（PRJ-08） */
+  getGlobalInstructions?: () => string
+  /** タイトルの自動生成（THR-03） */
+  titles?: Pick<TitleGenerator, 'generate'>
   /** 上限の確認と概算コスト（USG）。省略時は既定の単価表で計算し、上限は確認しない */
   usage?: Pick<UsageService, 'check' | 'estimate'>
   /** テストで待ち時間を短縮するために差し替える */
@@ -99,6 +105,12 @@ export class ChatService {
     this.sleep = deps.sleep ?? abortableSleep
   }
 
+  /** 表示中の分岐（CHT-06） */
+  private path(threadId: string): ops.MessageRecord[] {
+    const thread = ops.getThread(this.deps.db, threadId)
+    return activePath(ops.listMessagesByThread(this.deps.db, threadId), thread?.active_leaf_id)
+  }
+
   // ========================================
   // 公開操作
   // ========================================
@@ -114,7 +126,7 @@ export class ChatService {
   send(input: SendMessageInput): SendResult {
     const { thread, project, model } = this.prepare(input.threadId)
     this.checkNewContent(input.content, input.attachmentIds.length)
-    const parent = activePath(ops.listMessagesByThread(this.deps.db, thread.id)).at(-1) ?? null
+    const parent = this.path(thread.id).at(-1) ?? null
 
     const userMessage = this.createUserMessage(thread.id, parent?.id ?? null, input.content, () =>
       this.deps.attachments.getStaged(input.attachmentIds)
@@ -127,19 +139,19 @@ export class ChatService {
     return { userMessage: this.getPublic(userMessage.id), assistantMessage }
   }
 
-  /** 最新のユーザーメッセージに対する応答を作り直す（停止・エラー後の再試行） */
+  /** ユーザーメッセージに対する応答を作り直す（停止・エラー後の再試行、CHT-06 の再生成） */
   regenerate(userMessageId: string): Message {
-    const user = this.latestUserMessage(userMessageId)
+    const user = this.userMessageInPath(userMessageId)
     const { project, model } = this.prepare(user.thread_id)
     return this.startGeneration(project, user.thread_id, user.id, model)
   }
 
   /**
-   * 最新のユーザーメッセージを編集して再送信する（CHT-14）
+   * ユーザーメッセージを編集して再送信する（CHT-14。CHT-06 により最新以外も編集できる）
    * 元のメッセージと応答は分岐履歴として残し、同じ親の下に新しいメッセージを作る。
    */
   editAndResend(input: EditAndResendInput): SendResult {
-    const original = this.latestUserMessage(input.userMessageId)
+    const original = this.userMessageInPath(input.userMessageId)
     const { project, model } = this.prepare(original.thread_id)
     const existing = this.attachmentsByMessage(original.thread_id).get(original.id) ?? []
     const kept = existing.filter((a) => input.keepAttachmentIds.includes(a.id))
@@ -237,13 +249,12 @@ export class ChatService {
     }
   }
 
-  private latestUserMessage(userMessageId: string): ops.MessageRecord {
+  /** 表示中の分岐にあるユーザーメッセージ（CHT-06: 最新以外も編集・再生成できる） */
+  private userMessageInPath(userMessageId: string): ops.MessageRecord {
     const target = ops.getMessage(this.deps.db, userMessageId)
     if (!target || target.role !== 'user') throw new ValidationError('メッセージが見つかりません。')
-    const path = activePath(ops.listMessagesByThread(this.deps.db, target.thread_id))
-    const latest = path.filter((m) => m.role === 'user').at(-1)
-    if (latest?.id !== target.id) {
-      throw new ValidationError('編集・再送信できるのは最新のメッセージだけです。')
+    if (!this.path(target.thread_id).some((m) => m.id === target.id)) {
+      throw new ValidationError('表示中の会話にないメッセージは編集・再送信できません。')
     }
     return target
   }
@@ -258,7 +269,10 @@ export class ChatService {
     newAttachments: () => AttachmentInfo[]
   ): ops.MessageRecord {
     const added = newAttachments()
-    const history = activePath(ops.listMessagesByThread(this.deps.db, threadId))
+    // 送信先の分岐（親までの一続き）
+    const history = parentId
+      ? pathTo(ops.listMessagesByThread(this.deps.db, threadId), parentId)
+      : []
     const historyIds = new Set(history.map((m) => m.id))
     const historyBytes = ops
       .listAttachmentsByThread(this.deps.db, threadId)
@@ -284,7 +298,7 @@ export class ChatService {
     const chars = [...firstLine]
     const title =
       chars.length > TITLE_LENGTH ? `${chars.slice(0, TITLE_LENGTH).join('')}…` : firstLine
-    ops.updateThread(this.deps.db, threadId, { title })
+    ops.updateThread(this.deps.db, threadId, { title, title_source: 'auto' })
   }
 
   // ========================================
@@ -305,6 +319,8 @@ export class ChatService {
       status: 'streaming',
       model
     })
+    // CHT-06: 新しい応答を表示中の分岐にする
+    ops.updateThread(this.deps.db, threadId, { active_leaf_id: assistant.id })
     const controller = new AbortController()
     const entry = { controller, done: Promise.resolve() }
     entry.done = this.generate(project, threadId, assistant.id, model, controller.signal)
@@ -318,8 +334,7 @@ export class ChatService {
   }
 
   private buildMessages(threadId: string, assistantId: string): Anthropic.Beta.BetaMessageParam[] {
-    const records = ops.listMessagesByThread(this.deps.db, threadId)
-    const path = activePath(records).filter((m) => m.id !== assistantId)
+    const path = this.path(threadId).filter((m) => m.id !== assistantId)
     const attachments = new Map<string, ops.AttachmentRecord[]>()
     for (const a of ops.listAttachmentsByThread(this.deps.db, threadId)) {
       attachments.set(a.message_id, [...(attachments.get(a.message_id) ?? []), a])
@@ -355,6 +370,16 @@ export class ChatService {
     const { emit } = this.deps
     const info = this.deps.modelService.getModelInfo(model)
     const adaptive = info?.supports_adaptive_thinking ?? false
+    const thread = ops.getThread(this.deps.db, threadId)
+    // CHT-07: 思考量（モデルが対応している場合のみ指定する）
+    const effort =
+      thread?.effort && info?.effort_levels.includes(thread.effort) ? thread.effort : null
+    // PRJ-08: グローバル → プロジェクトの順に結合する。CTX-02 の要約も加える
+    const system = combineInstructions(
+      this.deps.getGlobalInstructions?.() ?? '',
+      project.custom_instructions,
+      thread?.context_summary
+    )
     const params: Anthropic.Beta.MessageCreateParamsStreaming = {
       model,
       max_tokens: Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS),
@@ -362,7 +387,8 @@ export class ChatService {
       stream: true,
       // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
       cache_control: { type: 'ephemeral' },
-      ...(project.custom_instructions ? { system: project.custom_instructions } : {}),
+      ...(system ? { system } : {}),
+      ...(effort ? { output_config: { effort } } : {}),
       ...(adaptive
         ? {
             thinking: {
@@ -527,6 +553,108 @@ export class ChatService {
     this.running.delete(message.thread_id)
     const errorMessage = errorKind ? API_ERROR_MESSAGES[errorKind] : null
     this.deps.emit({ type: 'finished', threadId: message.thread_id, message, errorMessage })
+
+    // THR-03: 最初のやり取りが完了したらタイトルを作る（失敗しても会話には影響させない）
+    if (status === 'complete' && this.deps.titles) {
+      const thread = ops.getThread(db, message.thread_id)
+      const path = this.path(message.thread_id)
+      if (thread?.title_source === 'auto' && path.length === 2 && path[0].role === 'user') {
+        void this.deps.titles.generate(thread.id, path[0].content, content, message.model ?? '')
+      }
+    }
+  }
+
+  // ========================================
+  // コンテキスト管理（CTX-02）
+  // ========================================
+
+  /**
+   * これまでの会話を要約し、要約を引き継いだ新しいスレッドを作る
+   * 過去の思考ブロックは持ち越さない（要約だけで続ける単純な圧縮。履歴の書き換えによる不整合を避ける）
+   */
+  async compact(threadId: string): Promise<Thread> {
+    const { thread, project, model } = this.prepare(threadId)
+    const path = this.path(threadId)
+    if (path.filter((m) => m.role === 'assistant' && m.status === 'complete').length === 0) {
+      throw new ValidationError('要約できる会話がありません。')
+    }
+    const apiKey = this.deps.getApiKey()!
+    const client = this.deps.createClient(apiKey)
+    const info = this.deps.modelService.getModelInfo(model)
+    const messages = this.buildMessages(threadId, '')
+    messages.push({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'ここまでの会話を、新しいスレッドで続けるための要約にしてください。決定事項、前提条件、作業中の内容、未解決の課題、ユーザーの好みなど、続きの会話に必要な情報は省かずに含めてください。要約だけを出力してください。'
+        }
+      ]
+    })
+    const system = combineInstructions(
+      this.deps.getGlobalInstructions?.() ?? '',
+      project.custom_instructions,
+      thread.context_summary
+    )
+    let final: Anthropic.Beta.BetaMessage
+    try {
+      final = await client.beta.messages
+        .stream({
+          model,
+          max_tokens: Math.min(16_000, info?.max_tokens ?? 16_000),
+          messages,
+          ...(system ? { system } : {}),
+          ...(info?.supports_adaptive_thinking
+            ? {
+                thinking: {
+                  type: 'adaptive' as const,
+                  block_binding: { prefix_mismatch_behavior: 'drop_block' as const }
+                },
+                betas: [THINKING_BETA]
+              }
+            : {})
+        })
+        .finalMessage()
+    } catch (error) {
+      throw toApiRequestError(error, 'chat.compact')
+    }
+    const summary = final.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as { text: string }).text)
+      .join('')
+      .trim()
+    if (!summary) throw new ValidationError('要約を作成できませんでした。')
+
+    const usage = {
+      input_tokens: final.usage.input_tokens,
+      output_tokens: final.usage.output_tokens,
+      cache_creation_input_tokens: final.usage.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: final.usage.cache_read_input_tokens ?? 0
+    }
+    ops.insertUsageRecord(this.deps.db, {
+      project_id: project.id,
+      project_name: project.name,
+      thread_id: threadId,
+      message_id: null,
+      model,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_read_tokens: usage.cache_read_input_tokens,
+      cache_write_tokens: usage.cache_creation_input_tokens,
+      estimated_cost:
+        (this.deps.usage ? this.deps.usage.estimate(model, usage) : estimateCost(model, usage)) ?? 0
+    })
+
+    const next = ops.createThread(this.deps.db, {
+      project_id: project.id,
+      title: `${thread.title ?? '無題のスレッド'}（続き）`,
+      ...(thread.model ? { model: thread.model } : {})
+    })
+    return ops.updateThread(this.deps.db, next.id, {
+      context_summary: summary,
+      effort: thread.effort,
+      title_source: 'manual'
+    })!
   }
 
   // ========================================

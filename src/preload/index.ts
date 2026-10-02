@@ -34,7 +34,9 @@ const api: LuminaApi = {
     update: invoke('threads:update'),
     delete: invoke('threads:delete'),
     markOpened: invoke('threads:markOpened'),
-    getLastOpened: invoke('threads:getLastOpened')
+    getLastOpened: invoke('threads:getLastOpened'),
+    get: invoke('threads:get'),
+    setActiveLeaf: invoke('threads:setActiveLeaf')
   },
   messages: {
     listByThread: invoke('messages:listByThread')
@@ -61,11 +63,16 @@ const api: LuminaApi = {
     get: invoke('settings:getChatPrefs'),
     set: invoke('settings:setChatPrefs')
   },
+  instructions: {
+    get: invoke('settings:getGlobalInstructions'),
+    set: invoke('settings:setGlobalInstructions')
+  },
   chat: {
     send: invoke('chat:send'),
     regenerate: invoke('chat:regenerate'),
     editAndResend: invoke('chat:editAndResend'),
     stop: invoke('chat:stop'),
+    compact: invoke('chat:compact'),
     onEvent: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: ChatEvent): void =>
         listener(payload)
@@ -91,6 +98,7 @@ const api: LuminaApi = {
     status: invoke('usage:status'),
     summary: invoke('usage:summary'),
     threadTotals: invoke('usage:threadTotals'),
+    context: invoke('usage:context'),
     getLimits: invoke('usage:getLimits'),
     setLimits: invoke('usage:setLimits'),
     setProjectLimit: invoke('usage:setProjectLimit')

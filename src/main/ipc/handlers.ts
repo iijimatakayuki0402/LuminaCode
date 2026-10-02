@@ -13,6 +13,8 @@ import { normalizeApiKey, type ApiKeyStore } from '../secrets/apiKeyStore'
 import { validateWorkFolder, type WorkFolderPolicy } from '../security/workFolder'
 import { getAppearance, setAppearance } from '../settings/appearance'
 import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
+import { getGlobalInstructions, setGlobalInstructions } from '../settings/instructions'
+import { leafFrom } from '@shared/conversation'
 import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
 import type { CoworkService } from '../cowork/coworkService'
@@ -140,11 +142,28 @@ export function createHandlers({
       found(ops.getProject(db, checked.project_id), PROJECT_NOT_FOUND)
       return ops.createThread(db, checked)
     },
-    'threads:update': (threadId, input) =>
-      found(
-        ops.updateThread(db, v.id(threadId, 'id'), v.updateThreadInput(input, 'input')),
+    'threads:update': (threadId, input) => {
+      const checked = v.updateThreadInput(input, 'input')
+      return found(
+        ops.updateThread(db, v.id(threadId, 'id'), {
+          ...checked,
+          // THR-03: 手動で変更したタイトルは自動生成で上書きしない
+          ...(checked.title !== undefined ? { title_source: 'manual' as const } : {})
+        }),
         THREAD_NOT_FOUND
-      ),
+      )
+    },
+    'threads:get': (threadId) => found(ops.getThread(db, v.id(threadId, 'id')), THREAD_NOT_FOUND),
+    'threads:setActiveLeaf': (threadId, messageId) => {
+      const id = v.id(threadId, 'threadId')
+      found(ops.getThread(db, id), THREAD_NOT_FOUND)
+      const records = ops.listMessagesByThread(db, id)
+      const target = v.id(messageId, 'messageId')
+      if (!records.some((m) => m.id === target)) {
+        throw new NotFoundError('メッセージが見つかりません。')
+      }
+      return ops.updateThread(db, id, { active_leaf_id: leafFrom(records, target) })!
+    },
     'threads:delete': (threadId) =>
       deleted(ops.deleteThread(db, v.id(threadId, 'id')), THREAD_NOT_FOUND),
     'threads:markOpened': (threadId) =>
@@ -195,6 +214,15 @@ export function createHandlers({
       const checked = v.editAndResendInput(input, 'input')
       return engineForMessage(checked.userMessageId).editAndResend(checked)
     },
+    'chat:compact': (threadId) => {
+      const id = v.id(threadId, 'threadId')
+      if (engineForThread(id) !== chatService) {
+        throw new ops.ValidationError('Cowork のスレッドは自動で圧縮されるため、要約は不要です。')
+      }
+      return chatService.compact(id)
+    },
+    'settings:getGlobalInstructions': () => getGlobalInstructions(db),
+    'settings:setGlobalInstructions': (text) => setGlobalInstructions(db, v.str(text, 'text')),
     'chat:stop': (threadId) => {
       const checked = v.id(threadId, 'threadId')
       engineForThread(checked).stop(checked)
@@ -227,6 +255,11 @@ export function createHandlers({
     'usage:status': (projectId) => usage.status(v.optional(v.id)(projectId, 'projectId')),
     'usage:summary': (m) => usage.summary(v.optional(v.month)(m, 'month')),
     'usage:threadTotals': (threadId) => usage.threadTotals(v.id(threadId, 'threadId')),
+    'usage:context': (threadId) => {
+      const { tokens, model } = usage.contextOf(v.id(threadId, 'threadId'))
+      const limit = model ? (modelService.getModelInfo(model)?.max_input_tokens ?? null) : null
+      return { tokens, model, limit }
+    },
     'usage:getLimits': () => usage.getLimits(),
     'usage:setLimits': (input) => usage.setLimits(v.usageLimitsInput(input, 'input')),
     'usage:setProjectLimit': (projectId, value) => {

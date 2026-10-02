@@ -80,7 +80,11 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
     const iterator = events()
     return {
       [Symbol.asyncIterator]: () => iterator,
-      finalMessage: async () => final
+      // 実際の SDK と同じく、イベントを読まずに呼んでも最後まで受け取ってから返す
+      finalMessage: async () => {
+        for await (const _ of iterator) void _
+        return final
+      }
     }
   }
 

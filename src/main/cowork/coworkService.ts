@@ -43,6 +43,7 @@ import { API_ERROR_MESSAGES } from '../api/errors'
 import * as ops from '../db/operations'
 import type { ModelService } from '../models/modelService'
 import type { UsageService } from '../usage/usageService'
+import type { TitleGenerator } from '../chat/titleGenerator'
 import {
   classifyTool,
   decide,
@@ -140,6 +141,10 @@ export interface CoworkServiceDeps {
   configDir: string
   /** パッケージ化したアプリでの claude.exe のパス */
   executablePath?: string
+  /** 全プロジェクト共通のカスタム指示（PRJ-08） */
+  getGlobalInstructions?: () => string
+  /** タイトルの自動生成（THR-03） */
+  titles?: Pick<TitleGenerator, 'generate'>
   /** 上限の確認と概算コスト（USG）。テストでは省略できる */
   usage?: Pick<UsageService, 'check' | 'estimate'>
   /** テストで Agent SDK を差し替える */
@@ -258,7 +263,7 @@ export class CoworkService {
     }
     const { thread, project, model, workRoot } = this.prepare(input.threadId)
     if (input.content.trim() === '') throw new ValidationError('メッセージを入力してください。')
-    const parent = activePath(ops.listMessagesByThread(this.deps.db, thread.id)).at(-1) ?? null
+    const parent = this.path(thread.id).at(-1) ?? null
     const user = ops.createMessage(this.deps.db, {
       thread_id: thread.id,
       parent_id: parent?.id ?? null,
@@ -424,10 +429,16 @@ export class CoworkService {
     return { threadId: thread.id, workRoot: project.work_folder ?? '' }
   }
 
+  /** 表示中の分岐（CHT-06） */
+  private path(threadId: string): ops.MessageRecord[] {
+    const thread = ops.getThread(this.deps.db, threadId)
+    return activePath(ops.listMessagesByThread(this.deps.db, threadId), thread?.active_leaf_id)
+  }
+
   private latestUser(userMessageId: string): ops.MessageRecord {
     const target = ops.getMessage(this.deps.db, userMessageId)
     if (!target || target.role !== 'user') throw new ValidationError('メッセージが見つかりません。')
-    const latest = activePath(ops.listMessagesByThread(this.deps.db, target.thread_id))
+    const latest = this.path(target.thread_id)
       .filter((m) => m.role === 'user')
       .at(-1)
     if (latest?.id !== target.id) {
@@ -452,7 +463,8 @@ export class CoworkService {
     const chars = [...line]
     if (chars.length === 0) return
     ops.updateThread(this.deps.db, threadId, {
-      title: chars.length > 40 ? `${chars.slice(0, 40).join('')}…` : line
+      title: chars.length > 40 ? `${chars.slice(0, 40).join('')}…` : line,
+      title_source: 'auto'
     })
   }
 
@@ -485,6 +497,8 @@ export class CoworkService {
       status: 'streaming',
       model
     })
+    // CHT-06: 新しい応答を表示中の分岐にする
+    ops.updateThread(this.deps.db, thread.id, { active_leaf_id: assistant.id })
     // SDK の累計は再開したセッションの以前の分を含む。分岐（fork）した場合も、巻き戻した位置ではなく
     // 元のセッション全体の累計から続く（実 API で確認）。そのため、スレッドで最後に実行した回の累計を基準にする
     const latest = this.deps.db
@@ -531,6 +545,9 @@ export class CoworkService {
       `ファイルやフォルダを削除するときは、コマンド（rm、del、Remove-Item など）ではなく、必ず ${DELETE_TOOL} ツールを使ってください。削除したものは作業フォルダの .lumina-trash に退避されます。`,
       'ツールの実行が拒否された場合は、理由に従い、別の方法を無理に試さずにユーザーへ報告してください。'
     ]
+    // PRJ-08: グローバル → プロジェクトの順
+    const global = this.deps.getGlobalInstructions?.() ?? ''
+    if (global.trim()) parts.push(`\n# 共通のカスタム指示\n${global.trim()}`)
     if (project.custom_instructions)
       parts.push(`\n# プロジェクトのカスタム指示\n${project.custom_instructions}`)
     // COW-11: 作業フォルダの CLAUDE.md を指示として適用する（設定ファイルの hooks などは読み込まない）
@@ -586,6 +603,12 @@ export class CoworkService {
     const signal = run.controller.signal
     const recorded = new Set<string>()
     const { query, tool, createSdkMcpServer } = await this.loadSdk()
+    const threadRow = ops.getThread(db, threadId)
+    const modelInfo = this.deps.modelService.getModelInfo(model)
+    const effort =
+      threadRow?.effort && modelInfo?.effort_levels.includes(threadRow.effort)
+        ? threadRow.effort
+        : null
 
     // 削除ツール（SEC-10）。実行前に PreToolUse フックで確認済み
     const deleteTool = tool(
@@ -681,6 +704,8 @@ export class CoworkService {
       },
       ...(this.deps.executablePath ? { pathToClaudeCodeExecutable: this.deps.executablePath } : {}),
       ...(budget !== null ? { maxBudgetUsd: budget } : {}),
+      // CHT-07: 思考量（モデルが対応している場合のみ）
+      ...(effort ? { effort } : {}),
       ...resume
     }
 
@@ -1043,5 +1068,14 @@ export class CoworkService {
       message,
       errorMessage: errorKind ? API_ERROR_MESSAGES[errorKind] : null
     })
+
+    // THR-03: 最初の実行が完了したらタイトルを作る
+    if (status === 'complete' && this.deps.titles) {
+      const thread = ops.getThread(db, threadId)
+      const path = this.path(threadId)
+      if (thread?.title_source === 'auto' && path.length === 2 && path[0].role === 'user') {
+        void this.deps.titles.generate(threadId, path[0].content, content, message.model ?? '')
+      }
+    }
   }
 }

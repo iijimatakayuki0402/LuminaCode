@@ -10,6 +10,7 @@ import type {
   Appearance,
   ChatEvent,
   ChatPrefs,
+  ContextUsage,
   CoworkPrefs,
   EditAndResendInput,
   FileChange,
@@ -65,6 +66,9 @@ export interface IpcContract {
   'threads:delete': { args: [id: string]; result: void }
   'threads:markOpened': { args: [id: string]; result: void }
   'threads:getLastOpened': { args: [projectId: string]; result: Thread | null }
+  'threads:get': { args: [id: string]; result: Thread }
+  /** 表示する分岐を切り替える（CHT-06）。指定したメッセージから最も新しい子を辿った末端を表示する */
+  'threads:setActiveLeaf': { args: [threadId: string, messageId: string]; result: Thread }
 
   'messages:listByThread': { args: [threadId: string]; result: Message[] }
 
@@ -89,6 +93,12 @@ export interface IpcContract {
   'chat:regenerate': { args: [userMessageId: string]; result: Message }
   'chat:editAndResend': { args: [input: EditAndResendInput]; result: SendResult }
   'chat:stop': { args: [threadId: string]; result: void }
+  /** これまでの会話を要約し、要約を引き継いだ新しいスレッドを作る（CTX-02） */
+  'chat:compact': { args: [threadId: string]; result: Thread }
+
+  /** 全プロジェクト共通のカスタム指示（PRJ-08） */
+  'settings:getGlobalInstructions': { args: []; result: string }
+  'settings:setGlobalInstructions': { args: [text: string]; result: string }
 
   /** Cowork: 確認ダイアログへの回答 */
   'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
@@ -112,6 +122,8 @@ export interface IpcContract {
   'usage:status': { args: [projectId?: string]; result: UsageStatus }
   'usage:summary': { args: [month?: string]; result: UsageSummary }
   'usage:threadTotals': { args: [threadId: string]; result: UsageTotals }
+  /** スレッドのコンテキスト使用量（CTX-01） */
+  'usage:context': { args: [threadId: string]; result: ContextUsage }
   'usage:getLimits': { args: []; result: UsageLimits }
   'usage:setLimits': { args: [input: Partial<UsageLimits>]; result: UsageLimits }
   'usage:setProjectLimit': { args: [projectId: string, limit: number | null]; result: void }
@@ -187,6 +199,8 @@ export interface LuminaApi {
     delete: Invoke<'threads:delete'>
     markOpened: Invoke<'threads:markOpened'>
     getLastOpened: Invoke<'threads:getLastOpened'>
+    get: Invoke<'threads:get'>
+    setActiveLeaf: Invoke<'threads:setActiveLeaf'>
   }
   messages: {
     listByThread: Invoke<'messages:listByThread'>
@@ -213,11 +227,16 @@ export interface LuminaApi {
     get: Invoke<'settings:getChatPrefs'>
     set: Invoke<'settings:setChatPrefs'>
   }
+  instructions: {
+    get: Invoke<'settings:getGlobalInstructions'>
+    set: Invoke<'settings:setGlobalInstructions'>
+  }
   chat: {
     send: Invoke<'chat:send'>
     regenerate: Invoke<'chat:regenerate'>
     editAndResend: Invoke<'chat:editAndResend'>
     stop: Invoke<'chat:stop'>
+    compact: Invoke<'chat:compact'>
     /** 生成中の通知を受け取る。戻り値で解除する */
     onEvent: (listener: (event: ChatEvent) => void) => () => void
   }
@@ -239,6 +258,7 @@ export interface LuminaApi {
     status: Invoke<'usage:status'>
     summary: Invoke<'usage:summary'>
     threadTotals: Invoke<'usage:threadTotals'>
+    context: Invoke<'usage:context'>
     getLimits: Invoke<'usage:getLimits'>
     setLimits: Invoke<'usage:setLimits'>
     setProjectLimit: Invoke<'usage:setProjectLimit'>

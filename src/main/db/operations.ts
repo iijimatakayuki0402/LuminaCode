@@ -7,6 +7,7 @@ import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import type {
   ApiErrorKind,
+  EffortLevel,
   CreateProjectInput,
   CreateThreadInput,
   MessageRole,
@@ -47,6 +48,10 @@ interface ThreadRow {
   last_opened_at: number | null
   created_at: number
   updated_at: number
+  active_leaf_id: string | null
+  effort: EffortLevel | null
+  context_summary: string | null
+  title_source: 'auto' | 'ai' | 'manual'
 }
 
 /**
@@ -321,40 +326,46 @@ export function getThread(db: Database.Database, id: string): Thread | null {
   return row ? toThread(row) : null
 }
 
+/** main 内部での更新（タイトルの由来・分岐の末端・要約を含む） */
+export interface UpdateThreadFields extends Omit<UpdateThreadInput, 'effort'> {
+  effort?: EffortLevel | '' | null
+  title_source?: 'auto' | 'ai' | 'manual'
+  active_leaf_id?: string | null
+  context_summary?: string | null
+}
+
 export function updateThread(
   db: Database.Database,
   id: string,
-  input: UpdateThreadInput
+  input: UpdateThreadFields
 ): Thread | null {
   const current = getThread(db, id)
   if (!current) return null
 
-  const now = Date.now()
   const updates: string[] = []
   const values: (string | number | null)[] = []
-
-  if (input.title !== undefined) {
-    updates.push('title = ?')
-    values.push(input.title || null)
-  }
-  if (input.model !== undefined) {
-    updates.push('model = ?')
-    values.push(input.model || null)
-  }
-  if (input.extended_thinking !== undefined) {
-    updates.push('extended_thinking = ?')
-    values.push(input.extended_thinking ? 1 : 0)
+  const set = (column: string, value: string | number | null): void => {
+    updates.push(`${column} = ?`)
+    values.push(value)
   }
 
-  if (updates.length === 0) return current
+  if (input.title !== undefined) set('title', input.title || null)
+  if (input.model !== undefined) set('model', input.model || null)
+  if (input.extended_thinking !== undefined)
+    set('extended_thinking', input.extended_thinking ? 1 : 0)
+  if (input.effort !== undefined) set('effort', input.effort || null)
+  if (input.title_source !== undefined) set('title_source', input.title_source)
+  if (input.context_summary !== undefined) set('context_summary', input.context_summary)
 
-  updates.push('updated_at = ?')
-  values.push(now)
+  // 表示中の分岐の切り替えは、スレッドの更新日時（一覧の並び順）を変えない
+  if (input.active_leaf_id !== undefined) {
+    db.prepare('UPDATE threads SET active_leaf_id = ? WHERE id = ?').run(input.active_leaf_id, id)
+  }
+  if (updates.length === 0) return getThread(db, id)
+
+  set('updated_at', Date.now())
   values.push(id)
-
-  const stmt = db.prepare(`UPDATE threads SET ${updates.join(', ')} WHERE id = ?`)
-  stmt.run(...values)
-
+  db.prepare(`UPDATE threads SET ${updates.join(', ')} WHERE id = ?`).run(...values)
   return getThread(db, id)
 }
 
@@ -539,7 +550,8 @@ export interface UsageInput {
   project_id: string
   project_name: string
   thread_id: string
-  message_id: string
+  /** 応答に紐付かない使用量（タイトル生成・要約）は null */
+  message_id: string | null
   model: string
   input_tokens: number
   output_tokens: number

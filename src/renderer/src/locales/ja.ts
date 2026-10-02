@@ -130,6 +130,10 @@ export const ja = {
     modelSource: { thread: 'スレッド', project: 'プロジェクト', default: '全体の既定' },
     noModel: '未選択（設定画面でモデル一覧を更新してください）',
     threadModel: 'このスレッドのモデル',
+    effort: '思考量',
+    effortDefault: 'モデルの既定',
+    effortLevels: { low: '少', medium: '中', high: '多', xhigh: 'とても多い', max: '最大' },
+    effortNote: '思考量を多くすると回答の質が上がることがありますが、時間と料金が増えます。',
     inherit: (model: string | null) =>
       `プロジェクト／全体の設定を使う${model ? `（${model}）` : ''}`,
     chatComingSoon: '会話の送受信は次の段階で実装します。',
@@ -171,6 +175,21 @@ export const ja = {
     tokens: (n: number) => `${n.toLocaleString()} tokens`,
     cost: (usd: number) => `約 $${formatUsd(usd)}`,
     coworkComingSoon: 'Cowork の実行は次の段階で実装します。',
+    branch: (index: number, total: number) => `${index} / ${total}`,
+    prevBranch: '前の版',
+    nextBranch: '次の版',
+    context: (tokens: number, limit: number | null) =>
+      limit
+        ? `コンテキスト ${tokens.toLocaleString()} / ${limit.toLocaleString()}（${Math.round((tokens / limit) * 100)}%）`
+        : `コンテキスト ${tokens.toLocaleString()} tokens`,
+    contextWarning: (percent: number) =>
+      `コンテキストがモデルの上限の ${percent}% に達しています。古いやり取りを要約して、新しいスレッドで続けることをお勧めします。`,
+    compact: '要約して新しいスレッドで続ける',
+    compacting: '要約しています…',
+    compactConfirm:
+      'これまでの会話を要約し、要約を引き継いだ新しいスレッドを作ります（要約に API の利用料がかかります）。元のスレッドはそのまま残ります。',
+    summaryNote: 'このスレッドは、以前の会話の要約を引き継いでいます。',
+    showSummary: '引き継いだ要約を表示',
     sendKey: '送信キー',
     sendKeys: { enter: 'Enter で送信', ctrl_enter: 'Ctrl+Enter で送信' }
   },
@@ -331,6 +350,11 @@ export const ja = {
     section: 'データ',
     dataPath: (path: string) => `データ保存先: ${path}`,
     logPath: (path: string) => `アプリログ: ${path}`
+  },
+  instructions: {
+    section: '共通のカスタム指示',
+    label: 'すべてのプロジェクトに適用する指示（プロジェクトのカスタム指示より先に適用します）',
+    saved: '保存しました。'
   },
   appearance: {
     section: '表示',

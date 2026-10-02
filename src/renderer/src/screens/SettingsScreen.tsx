@@ -27,6 +27,7 @@ export function SettingsScreen({
       <ApiKeySection status={status} onStatusChange={onStatusChange} />
       <ModelSection configured={status.configured} />
       <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
+      <GlobalInstructionsSection />
       <ChatPrefsSection />
       <CoworkPrefsSection />
       <UsageLimitsSection />
@@ -95,6 +96,54 @@ function AppearanceSection({
           ))}
         </div>
       </fieldset>
+      <Message message={message} />
+    </section>
+  )
+}
+
+/**
+ * 共通のカスタム指示（PRJ-08: グローバル → プロジェクトの順に結合して適用する）
+ */
+function GlobalInstructionsSection(): React.JSX.Element {
+  const textId = useId()
+  const [text, setText] = useState('')
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.instructions.get())
+      .then((t) => active && setText(t))
+      .catch((e: unknown) => active && setMessage({ tone: 'error', text: (e as Error).message }))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const save = async (): Promise<void> => {
+    try {
+      setText(await unwrap(window.lumina.instructions.set(text)))
+      setMessage({ tone: 'info', text: ja.instructions.saved })
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="settings-instructions">
+      <h2 id="settings-instructions">{ja.instructions.section}</h2>
+      <div className="field">
+        <label htmlFor={textId}>{ja.instructions.label}</label>
+        <textarea
+          id={textId}
+          className="input textarea"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <span className="hint">{ja.projectDialog.count([...text].length, 20000)}</span>
+      </div>
+      <button className="btn btn-primary" type="button" onClick={() => void save()}>
+        {ja.common.save}
+      </button>
       <Message message={message} />
     </section>
   )

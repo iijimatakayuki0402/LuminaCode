@@ -260,6 +260,20 @@ export const MIGRATIONS: Migration[] = [
       'ALTER TABLE messages ADD COLUMN agent_usage_total TEXT',
       'CREATE INDEX IF NOT EXISTS idx_usage_thread_only ON usage_records(thread_id)'
     ]
+  },
+  {
+    // Phase 2（会話の強化）
+    //   threads.active_leaf_id:   表示中の分岐の末端（CHT-06。未設定なら各階層で最も新しい子を辿る）
+    //   threads.effort:           思考量（CHT-07。未設定はモデルの既定）
+    //   threads.context_summary:  要約して続けたスレッドの、元の会話の要約（CTX-02）
+    //   threads.title_source:     タイトルの由来（auto: 最初の発言 / ai: 自動生成 / manual: 手動。THR-03）
+    version: 5,
+    statements: [
+      'ALTER TABLE threads ADD COLUMN active_leaf_id TEXT',
+      'ALTER TABLE threads ADD COLUMN effort TEXT',
+      'ALTER TABLE threads ADD COLUMN context_summary TEXT',
+      "ALTER TABLE threads ADD COLUMN title_source TEXT NOT NULL DEFAULT 'manual'"
+    ]
   }
 ]
 

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { activePath } from '@shared/conversation'
+import { activePath, siblingsOf } from '@shared/conversation'
 import type {
   AttachmentInfo,
   ChatPrefs,
+  ContextUsage,
+  Thread,
   Message,
   PermissionRequest,
   PermissionResponse,
@@ -12,7 +14,7 @@ import type {
 } from '@shared/types'
 import { CopyButton } from '../components/CopyButton'
 import { ChangesPanel, PermissionDialog, TodoPanel, ToolEventList } from '../components/CoworkParts'
-import { Dialog } from '../components/Dialog'
+import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Markdown } from '../components/Markdown'
 import { unwrap } from '../lib/ipc'
 import { ja } from '../locales/ja'
@@ -49,15 +51,23 @@ function useOnline(): boolean {
 export function ChatView({
   threadId,
   cowork = false,
-  onThreadChanged
+  onThreadChanged,
+  onCompacted
 }: {
   threadId: string
   /** Cowork のスレッド（ツール実行・確認ダイアログ・変更の取り消しを表示する） */
   cowork?: boolean
   /** タイトルの自動設定などでスレッド一覧の再読み込みが必要になったとき */
   onThreadChanged: () => void
+  /** 要約して新しいスレッドを作ったとき（CTX-02） */
+  onCompacted?: (thread: Thread) => void
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([])
+  /** 表示中の分岐の末端（CHT-06） */
+  const [leafId, setLeafId] = useState<string | null>(null)
+  const [summary, setSummary] = useState<string | null>(null)
+  const [context, setContext] = useState<ContextUsage | null>(null)
+  const [compacting, setCompacting] = useState<'confirm' | 'running' | null>(null)
   const [tools, setTools] = useState<ToolEventInfo[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
@@ -84,11 +94,16 @@ export function ChatView({
     Promise.all([
       unwrap(window.lumina.messages.listByThread(threadId)),
       unwrap(window.lumina.chatPrefs.get()),
-      cowork ? unwrap(window.lumina.cowork.toolEvents(threadId)) : Promise.resolve([])
+      cowork ? unwrap(window.lumina.cowork.toolEvents(threadId)) : Promise.resolve([]),
+      unwrap(window.lumina.threads.get(threadId)),
+      unwrap(window.lumina.usage.context(threadId))
     ])
-      .then(([list, p, events]) => {
+      .then(([list, p, events, thread, ctx]) => {
         if (!active) return
         setMessages(list)
+        setLeafId(thread.active_leaf_id)
+        setSummary(thread.context_summary)
+        setContext(ctx)
         setPrefs(p)
         setTools(events)
         setLive({})
@@ -111,6 +126,7 @@ export function ChatView({
         setPermissions([])
         // 使用量の累計・上限の警告、Cowork の「常に許可」の表示を更新する
         onThreadChangedRef.current()
+        void window.lumina.usage.context(threadId).then((r) => r.ok && setContext(r.value))
         if (event.errorMessage) setError(event.errorMessage)
         return
       }
@@ -130,6 +146,10 @@ export function ChatView({
       }
       if (event.type === 'todos') {
         setTodos(event.todos)
+        return
+      }
+      if (event.type === 'threadUpdated') {
+        onThreadChangedRef.current()
         return
       }
       setLive((map) => {
@@ -156,7 +176,7 @@ export function ChatView({
     }
   }, [threadId, cowork])
 
-  const path = useMemo(() => activePath(messages), [messages])
+  const path = useMemo(() => activePath(messages, leafId), [messages, leafId])
   const generating = path.some((m) => m.status === 'streaming')
   const latestUserId = [...path].reverse().find((m) => m.role === 'user')?.id ?? null
   const last = path.at(-1)
@@ -169,8 +189,64 @@ export function ChatView({
 
   const addMessages = (...added: Message[]): void => {
     setMessages((list) => [...list, ...added])
+    // CHT-06: 新しい応答を表示中の分岐にする（main 側と同じ）
+    const newest = added.at(-1)
+    if (newest) setLeafId(newest.id)
     stickToBottom.current = true
   }
+
+  /** 分岐の切り替え（CHT-06） */
+  const switchBranch = async (messageId: string): Promise<void> => {
+    try {
+      const thread = await unwrap(window.lumina.threads.setActiveLeaf(threadId, messageId))
+      setLeafId(thread.active_leaf_id)
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  const compact = async (): Promise<void> => {
+    setCompacting('running')
+    setError(null)
+    try {
+      const next = await unwrap(window.lumina.chat.compact(threadId))
+      onCompacted?.(next)
+    } catch (e) {
+      fail(e)
+    } finally {
+      setCompacting(null)
+    }
+  }
+
+  const branchNav = (m: Message): React.ReactNode => {
+    const { siblings, index } = siblingsOf(messages, m)
+    if (siblings.length < 2) return null
+    return (
+      <span className="branch-nav">
+        <button
+          className="btn btn-sm"
+          type="button"
+          aria-label={ja.chat.prevBranch}
+          disabled={index === 0 || generating}
+          onClick={() => void switchBranch(siblings[index - 1].id)}
+        >
+          ‹
+        </button>
+        <span className="mono">{ja.chat.branch(index + 1, siblings.length)}</span>
+        <button
+          className="btn btn-sm"
+          type="button"
+          aria-label={ja.chat.nextBranch}
+          disabled={index === siblings.length - 1 || generating}
+          onClick={() => void switchBranch(siblings[index + 1].id)}
+        >
+          ›
+        </button>
+      </span>
+    )
+  }
+
+  const contextRatio = context?.limit ? context.tokens / context.limit : 0
 
   const fail = (e: unknown): void => setError((e as Error).message)
 
@@ -273,13 +349,21 @@ export function ChatView({
         role="log"
         aria-live="polite"
       >
+        {summary && (
+          <details className="summary-note">
+            <summary>{ja.chat.summaryNote}</summary>
+            <div className="thinking-body">{summary}</div>
+          </details>
+        )}
         {path.length === 0 && <p className="empty">{ja.chat.empty}</p>}
         {path.map((m) =>
           m.role === 'user' ? (
             <UserRow
               key={m.id}
               message={m}
-              editable={m.id === latestUserId && !generating}
+              // CHT-06: 通常チャットはどのメッセージも編集できる。Cowork は最新の指示のみ（CHT-14）
+              editable={!generating && (!cowork || m.id === latestUserId)}
+              branch={branchNav(m)}
               allowAttachments={!cowork}
               onResend={(content, keep, added) => resend(m, content, keep, added)}
               onError={fail}
@@ -292,11 +376,14 @@ export function ChatView({
               cowork={cowork}
               tools={cowork ? tools.filter((t) => t.message_id === m.id) : []}
               generating={generating}
+              branch={branchNav(m)}
             />
           )
         )}
         {last?.role === 'assistant' &&
-          ['error', 'stopped', 'interrupted'].includes(last.status) &&
+          !generating &&
+          // CHT-06: 通常チャットは完了した応答も再生成できる
+          (!cowork || ['error', 'stopped', 'interrupted'].includes(last.status)) &&
           latestUserId && (
             <div className="row" style={{ marginTop: '0.5rem' }}>
               <button
@@ -316,6 +403,33 @@ export function ChatView({
         </p>
       )}
       {!online && <p className="message message-info">{ja.chat.offline}</p>}
+
+      {/* CTX-01: コンテキスト使用量。CTX-02: 80% で警告し、要約して続けることを提案する */}
+      {!cowork && context && context.tokens > 0 && (
+        <div className={`context-bar${contextRatio >= 0.8 ? ' warn' : ''}`}>
+          <span className="mono">{ja.chat.context(context.tokens, context.limit)}</span>
+          {contextRatio >= 0.8 && (
+            <span>{ja.chat.contextWarning(Math.round(contextRatio * 100))}</span>
+          )}
+          <button
+            className="btn btn-sm"
+            type="button"
+            disabled={generating || compacting !== null}
+            onClick={() => setCompacting('confirm')}
+          >
+            {compacting === 'running' ? ja.chat.compacting : ja.chat.compact}
+          </button>
+        </div>
+      )}
+      {compacting === 'confirm' && (
+        <ConfirmDialog
+          title={ja.chat.compact}
+          confirmLabel={ja.chat.compact}
+          message={<p>{ja.chat.compactConfirm}</p>}
+          onCancel={() => setCompacting(null)}
+          onConfirm={() => void compact()}
+        />
+      )}
 
       {cowork && <TodoPanel todos={todos} />}
 
@@ -407,12 +521,15 @@ function UserRow({
   message,
   editable,
   allowAttachments,
+  branch,
   onResend,
   onError
 }: {
   message: Message
   editable: boolean
   allowAttachments: boolean
+  /** 分岐の切り替え（CHT-06） */
+  branch: React.ReactNode
   onResend: (content: string, keep: AttachmentInfo[], added: AttachmentInfo[]) => Promise<boolean>
   onError: (e: unknown) => void
 }): React.JSX.Element {
@@ -481,6 +598,7 @@ function UserRow({
           <div className="log-body user-text">{message.content}</div>
           <AttachmentChips items={message.attachments} />
           <div className="log-actions">
+            {branch}
             <CopyButton text={message.content} />
             {editable && (
               <button className="btn btn-sm" type="button" onClick={startEdit}>
@@ -499,13 +617,15 @@ function AssistantRow({
   live,
   cowork,
   tools,
-  generating
+  generating,
+  branch
 }: {
   message: Message
   live?: Live
   cowork: boolean
   tools: ToolEventInfo[]
   generating: boolean
+  branch: React.ReactNode
 }): React.JSX.Element {
   const streaming = message.status === 'streaming'
   const text = streaming ? (live?.text ?? '') : message.content
@@ -547,6 +667,7 @@ function AssistantRow({
       {message.stop_reason === 'max_tokens' && <p className="hint">{ja.chat.maxTokens}</p>}
       {/* CHT-13: 回答の下にコピーボタンを常時表示する（生成中は無効） */}
       <div className="log-actions">
+        {branch}
         <CopyButton text={message.content} disabled={streaming || message.content === ''} />
         {cowork && !streaming && tools.length > 0 && (
           <ChangesPanel messageId={message.id} disabled={generating} />
