@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useId, useState } from 'react'
 import { resolveModel } from '@shared/models'
-import type { AlwaysAllowRules, PermissionMode, Project, Thread } from '@shared/types'
+import type {
+  AlwaysAllowRules,
+  PermissionMode,
+  Project,
+  Thread,
+  UsageStatus,
+  UsageTotals
+} from '@shared/types'
 import { ConfirmDialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
 import { TypeBadge } from '../components/TypeBadge'
@@ -28,6 +35,8 @@ export function ProjectScreen({
   const [project, setProject] = useState(initialProject)
   const [always, setAlways] = useState<AlwaysAllowRules>({ thread: [], project: [] })
   const [trashOpen, setTrashOpen] = useState(false)
+  const [usageStatus, setUsageStatus] = useState<UsageStatus | null>(null)
+  const [threadUsage, setThreadUsage] = useState<UsageTotals | null>(null)
   const [threads, setThreads] = useState<Thread[] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
@@ -121,6 +130,24 @@ export function ProjectScreen({
       active = false
     }
   }, [project.id, project.type, selectedId, threads])
+
+  // USG-02: スレッドの累計、USG-04: 上限の 80% で警告・100% で停止の表示
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      unwrap(window.lumina.usage.status(project.id)),
+      selectedId ? unwrap(window.lumina.usage.threadTotals(selectedId)) : Promise.resolve(null)
+    ])
+      .then(([s, t]) => {
+        if (!active) return
+        setUsageStatus(s)
+        setThreadUsage(t)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [project.id, selectedId, threads])
 
   const clearAlways = async (scope: 'thread' | 'project'): Promise<void> => {
     try {
@@ -245,6 +272,17 @@ export function ProjectScreen({
               {ja.project.model}: <strong>{activeModel ?? ja.project.noModel}</strong>
             </span>
             {activeModel && <span className="muted">({modelSource})</span>}
+            {threadUsage && threadUsage.requests > 0 && (
+              <span className="muted">
+                {ja.usage.threadTotal(
+                  threadUsage.input_tokens +
+                    threadUsage.output_tokens +
+                    threadUsage.cache_read_tokens +
+                    threadUsage.cache_write_tokens,
+                  threadUsage.cost
+                )}
+              </span>
+            )}
             {project.type === 'cowork' && (
               <>
                 {/* COW-09: 権限モードを切り替える */}
@@ -266,6 +304,18 @@ export function ProjectScreen({
               </>
             )}
           </div>
+          {usageStatus && usageStatus.level !== 'ok' && (
+            <p
+              className={`message ${usageStatus.level === 'exceeded' && usageStatus.action === 'stop' ? 'message-error' : 'message-info'}`}
+              role="status"
+            >
+              {usageStatus.level === 'warning'
+                ? ja.usage.warning(Math.floor(usageStatus.ratio * 100))
+                : usageStatus.action === 'stop'
+                  ? ja.usage.exceededStop
+                  : ja.usage.exceededWarn}
+            </p>
+          )}
           {project.type === 'cowork' && <p className="hint">{ja.cowork.commandLimit}</p>}
 
           <Message message={message} />

@@ -16,6 +16,7 @@ import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
 import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
 import type { CoworkService } from '../cowork/coworkService'
+import type { UsageService } from '../usage/usageService'
 import { listTrash, purgeTrash, restoreFromTrash } from '../cowork/trash'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
 import type { AttachmentInfo, StageResult } from '@shared/types'
@@ -39,6 +40,7 @@ export interface HandlerDeps {
   selectFiles: () => Promise<string[]>
   chatService: ChatService
   coworkService: CoworkService
+  usage: UsageService
   attachments: AttachmentStore
   /** 保存ダイアログで保存先を選び、内容を書き込む（キャンセル時は null） */
   saveFile: (defaultName: string, content: string) => Promise<string | null>
@@ -82,6 +84,7 @@ export function createHandlers({
   selectFiles,
   chatService,
   coworkService,
+  usage,
   attachments,
   saveFile
 }: HandlerDeps): IpcHandlers {
@@ -220,6 +223,17 @@ export function createHandlers({
       coworkService.clearAlways(v.scope(scope, 'scope'), v.id(id, 'id')),
     'cowork:getPrefs': () => coworkService.getPrefs(),
     'cowork:setPrefs': (input) => coworkService.setPrefs(v.coworkPrefsInput(input, 'input')),
+
+    'usage:status': (projectId) => usage.status(v.optional(v.id)(projectId, 'projectId')),
+    'usage:summary': (m) => usage.summary(v.optional(v.month)(m, 'month')),
+    'usage:threadTotals': (threadId) => usage.threadTotals(v.id(threadId, 'threadId')),
+    'usage:getLimits': () => usage.getLimits(),
+    'usage:setLimits': (input) => usage.setLimits(v.usageLimitsInput(input, 'input')),
+    'usage:setProjectLimit': (projectId, value) => {
+      const id = v.id(projectId, 'projectId')
+      found(ops.getProject(db, id), PROJECT_NOT_FOUND)
+      usage.setProjectLimit(id, v.limit(value, 'limit'))
+    },
 
     'logs:search': (filter) => searchToolEvents(db, v.toolEventFilter(filter, 'filter')),
     'logs:export': (filter, format) => {

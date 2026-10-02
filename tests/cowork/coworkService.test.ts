@@ -395,4 +395,23 @@ describe('中断と再開（COW-06、CHT-14）', () => {
     expect(undoError).toBeNull()
     expect(existsSync(join(work, 'n.txt'))).toBe(false)
   })
+
+  it('再開したセッションでも、その実行の分だけを使用量として記録する（累計を重複して数えない）', async () => {
+    setup([{ text: '1' }, { text: '2' }])
+    const first = await send('1回目')
+    const second = await send('2回目')
+    expect(fake.runs[1].options.resume).toBe('session-1')
+
+    const rows = db
+      .prepare(
+        'SELECT message_id, input_tokens, output_tokens, estimated_cost FROM usage_records ORDER BY created_at, rowid'
+      )
+      .all() as { message_id: string; input_tokens: number; estimated_cost: number }[]
+    expect(rows.map((r) => [r.message_id, r.input_tokens])).toEqual([
+      [first, 1000],
+      [second, 1000]
+    ])
+    expect(rows[1].estimated_cost).toBeCloseTo(0.0123, 6)
+    expect(ops.getMessage(db, second)!.estimated_cost).toBeCloseTo(0.0123, 6)
+  })
 })

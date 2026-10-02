@@ -6,6 +6,7 @@ import { unwrap } from './lib/ipc'
 import { ja } from './locales/ja'
 import { DashboardScreen } from './screens/DashboardScreen'
 import { OperationLogScreen } from './screens/OperationLogScreen'
+import { UsageScreen } from './screens/UsageScreen'
 import { ProjectScreen } from './screens/ProjectScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupScreen } from './screens/SetupScreen'
@@ -15,6 +16,7 @@ type Screen =
   | { name: 'dashboard' }
   | { name: 'settings' }
   | { name: 'logs' }
+  | { name: 'usage' }
   | { name: 'project'; project: Project }
 
 export default function App(): React.JSX.Element {
@@ -83,6 +85,11 @@ export default function App(): React.JSX.Element {
               {ja.nav.dashboard}
             </button>
           )}
+          {screen.name !== 'usage' && (
+            <button className="btn" type="button" onClick={() => setScreen({ name: 'usage' })}>
+              {ja.usage.nav}
+            </button>
+          )}
           {screen.name !== 'logs' && (
             <button className="btn" type="button" onClick={() => setScreen({ name: 'logs' })}>
               {ja.logs.nav}
@@ -104,6 +111,7 @@ export default function App(): React.JSX.Element {
         />
       )}
       {screen.name === 'logs' && <OperationLogScreen />}
+      {screen.name === 'usage' && <UsageScreen />}
       {screen.name === 'dashboard' && (
         <DashboardScreen
           apiKeyConfigured={status.configured}

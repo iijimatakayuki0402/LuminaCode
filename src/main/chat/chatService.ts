@@ -27,6 +27,7 @@ import type { ClientFactory } from '../api/client'
 import { API_ERROR_MESSAGES, toApiRequestError } from '../api/errors'
 import * as ops from '../db/operations'
 import type { ModelService } from '../models/modelService'
+import type { UsageService } from '../usage/usageService'
 import { ATTACHMENT_LIMITS, kindOfMime, toContentBlock, type AttachmentStore } from './attachments'
 import { estimateCost, type TokenUsage } from './pricing'
 
@@ -47,6 +48,8 @@ export interface ChatServiceDeps {
   getApiKey: () => string | null
   createClient: ClientFactory
   emit: (event: ChatEvent) => void
+  /** 上限の確認と概算コスト（USG）。省略時は既定の単価表で計算し、上限は確認しない */
+  usage?: Pick<UsageService, 'check' | 'estimate'>
   /** テストで待ち時間を短縮するために差し替える */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   flushIntervalMs?: number
@@ -218,6 +221,8 @@ export class ChatService {
         'モデルが選択されていません。設定画面でモデル一覧を更新してください。'
       )
     }
+    // USG-04: 上限に達していれば停止する
+    this.deps.usage?.check(project.id)
     return { thread, project, model }
   }
 
@@ -486,7 +491,9 @@ export class ChatService {
     // 停止・エラーでも、API が受け付けた分は課金されるため記録する
     if (billing && billing.usage.input_tokens + billing.usage.output_tokens > 0) {
       const u = billing.usage
-      cost = estimateCost(billing.model, u)
+      cost = this.deps.usage
+        ? this.deps.usage.estimate(billing.model, u)
+        : estimateCost(billing.model, u)
       tokens =
         u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
       ops.insertUsageRecord(db, {
@@ -511,6 +518,10 @@ export class ChatService {
       tokens_used: tokens,
       estimated_cost: cost
     })
+    // 10.2: API 呼び出しの成否を記録する（本文は含めない）
+    console.info(
+      `[chat] request ${status}: model=${billing?.model ?? '-'} tokens=${tokens ?? 0}${errorKind ? ` error=${errorKind}` : ''}${stopReason ? ` stop=${stopReason}` : ''}`
+    )
     const message = this.getPublic(assistantId)
     // 完了の通知を受けてすぐ次の操作ができるよう、通知より先に「生成中」を解除する
     this.running.delete(message.thread_id)
@@ -537,9 +548,15 @@ export class ChatService {
   }
 
   private toPublic(record: ops.MessageRecord, attachments: ops.AttachmentRecord[]): Message {
-    const { content_blocks: _blocks, agent_resume_uuid: _resume, ...rest } = record
+    const {
+      content_blocks: _blocks,
+      agent_resume_uuid: _resume,
+      agent_usage_total: _total,
+      ...rest
+    } = record
     void _blocks
     void _resume
+    void _total
     return { ...rest, thinking: thinkingOf(record), attachments: attachments.map(toInfo) }
   }
 }

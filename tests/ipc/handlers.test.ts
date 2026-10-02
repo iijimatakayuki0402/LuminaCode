@@ -17,6 +17,7 @@ import { AttachmentStore } from '../../src/main/chat/attachments'
 import { ChatService } from '../../src/main/chat/chatService'
 import { CoworkService } from '../../src/main/cowork/coworkService'
 import { ModelService } from '../../src/main/models/modelService'
+import { UsageService } from '../../src/main/usage/usageService'
 import { ApiKeyStore, type SecretCipher } from '../../src/main/secrets/apiKeyStore'
 import { apiError, fakeClient } from '../helpers/fakeAnthropic'
 
@@ -95,6 +96,7 @@ beforeEach(() => {
     createClient,
     chatService,
     coworkService,
+    usage: new UsageService(db, join(dir, 'pricing.json')),
     saveFile: async (name, content) => {
       saved = { name, content }
       return join(dir, name)
@@ -107,7 +109,14 @@ beforeEach(() => {
       systemRoot: join(dir, 'Windows')
     },
     selectFolder: async (defaultPath) => selectedFolder ?? defaultPath ?? null,
-    appInfo: { version: '0.1.0', electron: 'e', chrome: 'c', dataPath: 'C:\\data' }
+    appInfo: {
+      version: '0.1.0',
+      electron: 'e',
+      chrome: 'c',
+      dataPath: 'C:\\data',
+      pricingPath: 'p',
+      logPath: 'l'
+    }
   })
 })
 
@@ -515,6 +524,34 @@ describe('Stage 6: Cowork・操作ログ', () => {
     expect(await value<unknown[]>('logs:search', {})).toHaveLength(1)
     expect(await call('logs:search', { category: 'nope' })).toMatchObject({
       error: { code: 'invalid_argument' }
+    })
+  })
+})
+
+describe('Stage 7: 使用量', () => {
+  it('上限の設定・状態・プロジェクト別上限', async () => {
+    const project = await value<Project>('projects:create', { type: 'chat', name: 'P' })
+    expect(await value('usage:getLimits')).toEqual({ monthlyLimit: null, action: 'stop' })
+    expect(await value('usage:setLimits', { monthlyLimit: 10, action: 'warn' })).toEqual({
+      monthlyLimit: 10,
+      action: 'warn'
+    })
+    await value('usage:setProjectLimit', project.id, 3)
+    expect(await value('usage:status', project.id)).toMatchObject({
+      monthlyLimit: 10,
+      projectLimit: 3,
+      level: 'ok'
+    })
+    expect(await call('usage:setLimits', { monthlyLimit: 'x' })).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+    expect(await call('usage:summary', '2026-13')).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+    expect(await value('usage:summary', '2026-10')).toMatchObject({
+      month: '2026-10',
+      projects: [],
+      projectLimits: { [project.id]: 3 }
     })
   })
 })

@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { ACCENTS, MODES } from '@shared/theme'
-import type { ApiKeyStatus, Appearance, ChatPrefs, ModelList } from '@shared/types'
+import type { AppInfo } from '@shared/ipc'
+import type { ApiKeyStatus, Appearance, ChatPrefs, ModelList, UsageLimits } from '@shared/types'
 import { ApiKeyForm } from '../components/ApiKeyForm'
 import { Message, type MessageState } from '../components/Message'
 import { unwrap } from '../lib/ipc'
@@ -28,6 +29,8 @@ export function SettingsScreen({
       <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
       <ChatPrefsSection />
       <CoworkPrefsSection />
+      <UsageLimitsSection />
+      <DataSection />
     </main>
   )
 }
@@ -215,6 +218,127 @@ function CoworkPrefsSection(): React.JSX.Element {
         {ja.common.save}
       </button>
       <Message message={message} />
+    </section>
+  )
+}
+
+/**
+ * 使用量の上限（USG-03、USG-04）
+ */
+function UsageLimitsSection(): React.JSX.Element {
+  const inputId = useId()
+  const [limits, setLimits] = useState<UsageLimits | null>(null)
+  const [value, setValue] = useState('')
+  const [info, setInfo] = useState<AppInfo | null>(null)
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  useEffect(() => {
+    let active = true
+    Promise.all([unwrap(window.lumina.usage.getLimits()), unwrap(window.lumina.app.getInfo())])
+      .then(([l, i]) => {
+        if (!active) return
+        setLimits(l)
+        setValue(l.monthlyLimit?.toString() ?? '')
+        setInfo(i)
+      })
+      .catch((e: unknown) => active && setMessage({ tone: 'error', text: (e as Error).message }))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const save = async (input: Partial<UsageLimits>): Promise<void> => {
+    try {
+      const next = await unwrap(window.lumina.usage.setLimits(input))
+      setLimits(next)
+      setValue(next.monthlyLimit?.toString() ?? '')
+      setMessage({ tone: 'info', text: ja.usage.saved })
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="settings-usage">
+      <h2 id="settings-usage">{ja.usage.settings}</h2>
+      <div className="field">
+        <label htmlFor={inputId}>{ja.usage.monthlyLimit}</label>
+        <div className="row">
+          <input
+            id={inputId}
+            className="input"
+            style={{ width: '10rem' }}
+            type="number"
+            min={0}
+            step="0.01"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <button
+            className="btn"
+            type="button"
+            onClick={() => void save({ monthlyLimit: value === '' ? null : Number(value) })}
+          >
+            {ja.common.save}
+          </button>
+        </div>
+      </div>
+      <fieldset className="field" style={{ border: 'none', padding: 0 }}>
+        <legend className="hint" style={{ marginBottom: '0.35rem' }}>
+          {ja.usage.action}
+        </legend>
+        <div className="segmented">
+          {(['stop', 'warn'] as const).map((action) => (
+            <label key={action}>
+              <input
+                type="radio"
+                name="usage-action"
+                checked={limits?.action === action}
+                onChange={() => void save({ action })}
+              />
+              {ja.usage.actions[action]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p className="hint">{ja.usage.disclaimer}</p>
+      {info && (
+        <p className="hint mono">
+          {ja.usage.pricingFile(info.pricingPath)}
+          <br />
+          {ja.usage.pricingNote}
+        </p>
+      )}
+      <Message message={message} />
+    </section>
+  )
+}
+
+/**
+ * データ（6.12: データ保存先の表示）
+ */
+function DataSection(): React.JSX.Element {
+  const [info, setInfo] = useState<AppInfo | null>(null)
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.app.getInfo())
+      .then((i) => active && setInfo(i))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
+  return (
+    <section className="panel" aria-labelledby="settings-data">
+      <h2 id="settings-data">{ja.data.section}</h2>
+      {info && (
+        <p className="hint mono">
+          {ja.data.dataPath(info.dataPath)}
+          <br />
+          {ja.data.logPath(info.logPath)}
+          <br />v{info.version} / Electron {info.electron}
+        </p>
+      )}
     </section>
   )
 }

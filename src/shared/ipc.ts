@@ -30,6 +30,10 @@ import type {
   ToolEventRow,
   TrashEntry,
   UndoResult,
+  UsageLimits,
+  UsageStatus,
+  UsageSummary,
+  UsageTotals,
   UpdateProjectInput,
   UpdateThreadInput
 } from './types'
@@ -40,6 +44,10 @@ export interface AppInfo {
   chrome: string
   /** データ保存先（要件 6.12 の設定画面で表示する） */
   dataPath: string
+  /** 単価表（USG-05） */
+  pricingPath: string
+  /** アプリログ（6.14） */
+  logPath: string
 }
 
 export interface IpcContract {
@@ -99,6 +107,14 @@ export interface IpcContract {
   /** Cowork: コマンドの拒否リスト・許可リスト（SEC-22、SEC-23） */
   'cowork:getPrefs': { args: []; result: CoworkPrefs }
   'cowork:setPrefs': { args: [input: Partial<CoworkPrefs>]; result: CoworkPrefs }
+
+  /** 使用量（USG-01〜05） */
+  'usage:status': { args: [projectId?: string]; result: UsageStatus }
+  'usage:summary': { args: [month?: string]; result: UsageSummary }
+  'usage:threadTotals': { args: [threadId: string]; result: UsageTotals }
+  'usage:getLimits': { args: []; result: UsageLimits }
+  'usage:setLimits': { args: [input: Partial<UsageLimits>]; result: UsageLimits }
+  'usage:setProjectLimit': { args: [projectId: string, limit: number | null]; result: void }
 
   /** 操作ログ（LOG-02、LOG-03） */
   'logs:search': { args: [filter: ToolEventFilter]; result: ToolEventRow[] }
@@ -218,6 +234,14 @@ export interface LuminaApi {
     clearAlways: Invoke<'cowork:clearAlways'>
     getPrefs: Invoke<'cowork:getPrefs'>
     setPrefs: Invoke<'cowork:setPrefs'>
+  }
+  usage: {
+    status: Invoke<'usage:status'>
+    summary: Invoke<'usage:summary'>
+    threadTotals: Invoke<'usage:threadTotals'>
+    getLimits: Invoke<'usage:getLimits'>
+    setLimits: Invoke<'usage:setLimits'>
+    setProjectLimit: Invoke<'usage:setProjectLimit'>
   }
   logs: {
     search: Invoke<'logs:search'>

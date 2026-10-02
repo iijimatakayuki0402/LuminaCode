@@ -19,6 +19,7 @@ import type {
   SendMessageInput,
   ToolCategory,
   ToolEventFilter,
+  UsageLimits,
   UpdateProjectInput,
   UpdateThreadInput
 } from '@shared/types'
@@ -171,6 +172,17 @@ const strings = array(str, 200)
 export const coworkPrefsInput = object<Partial<CoworkPrefs>>({
   denyPatterns: optional(strings),
   allowCommands: optional(strings)
+})
+
+export const month: Check<string> = (value, name) =>
+  typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : fail(name, 'YYYY-MM')
+
+export const limit: Check<number | null> = (value, name) =>
+  value === null ? null : num(value, name)
+
+export const usageLimitsInput = object<Partial<UsageLimits>>({
+  monthlyLimit: optional(limit),
+  action: optional(oneOf(['stop', 'warn'] as const))
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

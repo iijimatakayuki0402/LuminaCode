@@ -68,6 +68,8 @@ export interface MessageRecord {
   error_kind: ApiErrorKind | null
   /** Cowork: Agent SDK のセッション内の位置（編集・再実行で巻き戻す） */
   agent_resume_uuid?: string | null
+  /** Cowork: 実行終了時点の Agent SDK の累計（JSON） */
+  agent_usage_total?: string | null
 }
 
 export interface AttachmentRecord {

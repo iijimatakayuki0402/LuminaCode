@@ -34,6 +34,8 @@ type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: str
 export function fakeAgentSdk(scripts: Script[]): FakeAgent {
   const runs: FakeAgent['runs'] = []
   let index = 0
+  // 実際の SDK と同じく、再開したセッションの累計は以前の分を含む
+  const sessionTotals = new Map<string, { input: number; output: number; cost: number }>()
 
   const tool = (name: string, _d: string, _s: unknown, handler: Handler): unknown => ({
     name,
@@ -143,6 +145,17 @@ export function fakeAgentSdk(scripts: Script[]): FakeAgent {
         }
       }
       const success = (script.result ?? 'success') === 'success'
+      const previous = (options.resume && sessionTotals.get(options.resume)) || {
+        input: 0,
+        output: 0,
+        cost: 0
+      }
+      const total = {
+        input: previous.input + 1000,
+        output: previous.output + 200,
+        cost: previous.cost + 0.0123
+      }
+      sessionTotals.set(`session-${index}`, total)
       yield {
         type: 'result',
         subtype: success ? 'success' : 'error_during_execution',
@@ -153,6 +166,15 @@ export function fakeAgentSdk(scripts: Script[]): FakeAgent {
           output_tokens: 200,
           cache_read_input_tokens: 0,
           cache_creation_input_tokens: 0
+        },
+        modelUsage: {
+          'claude-sonnet-test': {
+            inputTokens: total.input,
+            outputTokens: total.output,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            costUSD: total.cost
+          }
         },
         errors: []
       }

@@ -924,3 +924,37 @@ dialog.dialog.danger .dialog-head {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 使用量（USG） */
+.usage-big {
+  font-size: 1.4rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.meter {
+  height: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+.meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.meter.warn span {
+  background: var(--hl-number);
+}
+.meter.over span {
+  background: var(--danger);
+}
+.month-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.month-list li {
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem 0;
+}

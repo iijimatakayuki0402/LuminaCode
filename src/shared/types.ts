@@ -56,6 +56,8 @@ export type ApiErrorKind =
   | 'too_large'
   | 'bad_request'
   | 'not_found'
+  /** 使用量の上限に達したため中断した（USG-04） */
+  | 'budget'
   | 'unknown'
 
 export type AttachmentKind = 'image' | 'pdf' | 'text'
@@ -321,6 +323,56 @@ export interface CoworkPrefs {
   denyPatterns: string[]
   /** 事前に許可するコマンド（SEC-23） */
   allowCommands: string[]
+}
+
+// ========================================
+// 使用量（要件 USG-01〜05）
+// ========================================
+
+export interface UsageTotals {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  /** 概算コスト（USD） */
+  cost: number
+  requests: number
+}
+
+export interface UsageLimits {
+  /** 月額上限（USD）。未設定は null（上限なし） */
+  monthlyLimit: number | null
+  /** 上限に達したときの動作（既定は停止。USG-04） */
+  action: 'stop' | 'warn'
+}
+
+export interface UsageStatus {
+  /** 対象の月（YYYY-MM） */
+  month: string
+  monthTotal: number
+  monthlyLimit: number | null
+  projectTotal: number
+  projectLimit: number | null
+  action: 'stop' | 'warn'
+  /** 上限に対する割合の大きいほう */
+  ratio: number
+  level: 'ok' | 'warning' | 'exceeded'
+}
+
+export interface ProjectUsage {
+  project_id: string | null
+  project_name: string
+  totals: UsageTotals
+  limit: number | null
+}
+
+export interface UsageSummary {
+  month: string
+  total: UsageTotals
+  months: { month: string; totals: UsageTotals }[]
+  projects: ProjectUsage[]
+  /** 設定されているプロジェクト別の上限（当月に使用量の無いプロジェクトを含む） */
+  projectLimits: Record<string, number>
 }
 
 // ========================================

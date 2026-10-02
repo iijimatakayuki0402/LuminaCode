@@ -250,6 +250,16 @@ export const MIGRATIONS: Migration[] = [
       'ALTER TABLE snapshots ADD COLUMN restored_at INTEGER',
       'CREATE INDEX IF NOT EXISTS idx_snapshots_message ON snapshots(message_id)'
     ]
+  },
+  {
+    // 使用量（Stage 7）
+    //   messages.agent_usage_total: Cowork の実行終了時点の Agent SDK の累計（モデル別のトークン）。
+    //   SDK の累計は再開したセッションでは以前の分を含むため、再開位置の累計との差分を使用量にする
+    version: 4,
+    statements: [
+      'ALTER TABLE messages ADD COLUMN agent_usage_total TEXT',
+      'CREATE INDEX IF NOT EXISTS idx_usage_thread_only ON usage_records(thread_id)'
+    ]
   }
 ]
 

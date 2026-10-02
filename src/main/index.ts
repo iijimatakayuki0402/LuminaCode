@@ -9,6 +9,8 @@ import { AttachmentStore } from './chat/attachments'
 import { ChatService } from './chat/chatService'
 import { CoworkService } from './cowork/coworkService'
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
+import { installAppLog } from './logging/appLog'
+import { UsageService } from './usage/usageService'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
 import { closeDatabase, DatabaseIntegrityError, getDatabase } from './db/init'
 import { getMessage } from './db/operations'
@@ -23,6 +25,9 @@ import { isTrustedSenderUrl, type TrustedOrigin } from './security/ipcSender'
 // 開発時のみ、検証用に LUMINA_USER_DATA_DIR で切り替えられる（本来のデータを汚さないため）
 const devUserData = app.isPackaged ? undefined : process.env['LUMINA_USER_DATA_DIR']
 app.setPath('userData', devUserData ?? join(app.getPath('appData'), 'LuminaCode'))
+
+// 6.14、10.2: エラーなどをローカルのログファイルにも記録する（API キー・会話内容は出さない）
+const appLogPath = installAppLog(join(app.getPath('userData'), 'logs'))
 
 const rendererIndex = join(__dirname, '../renderer/index.html')
 const trustedOrigin: TrustedOrigin = {
@@ -120,8 +125,12 @@ function setupBackend(): boolean {
     return apiKey === null ? null : createAnthropicClient(apiKey)
   })
 
+  // USG-05: 単価表は %APPDATA%\LuminaCode\pricing.json で更新できる
+  const usage = new UsageService(db, join(app.getPath('userData'), 'pricing.json'))
+
   chatService = new ChatService({
     db,
+    usage,
     attachments,
     modelService,
     getApiKey: () => apiKeyStore.get(),
@@ -136,6 +145,7 @@ function setupBackend(): boolean {
 
   coworkService = new CoworkService({
     db,
+    usage,
     snapshotsDir: getSnapshotsDir(),
     modelService,
     getApiKey: () => apiKeyStore.get(),
@@ -165,6 +175,7 @@ function setupBackend(): boolean {
       modelService,
       chatService,
       coworkService,
+      usage,
       attachments,
       saveFile: async (defaultName, content) => {
         const owner = BrowserWindow.getFocusedWindow()
@@ -207,7 +218,9 @@ function setupBackend(): boolean {
         version: app.getVersion(),
         electron: process.versions.electron,
         chrome: process.versions.chrome,
-        dataPath: app.getPath('userData')
+        dataPath: app.getPath('userData'),
+        pricingPath: usage.pricingFile,
+        logPath: appLogPath
       }
     }),
     (event) => isTrustedSenderUrl(event.senderFrame?.url, trustedOrigin)

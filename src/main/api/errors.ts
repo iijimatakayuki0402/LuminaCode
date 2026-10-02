@@ -20,6 +20,7 @@ export const API_ERROR_MESSAGES: Record<ApiErrorKind, string> = {
   too_large: '入力が大きすぎます。会話の圧縮や、添付ファイルの削減を行ってください。',
   bad_request: 'リクエストが受け付けられませんでした。',
   not_found: '指定したモデルなどが見つかりません。モデル一覧を更新してください。',
+  budget: '使用量の上限に達したため、実行を中断しました。上限を引き上げるか、解除してください。',
   unknown: 'API の呼び出しで予期しないエラーが発生しました。'
 }
 

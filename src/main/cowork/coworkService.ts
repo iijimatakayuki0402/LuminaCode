@@ -42,6 +42,7 @@ import type {
 import { API_ERROR_MESSAGES } from '../api/errors'
 import * as ops from '../db/operations'
 import type { ModelService } from '../models/modelService'
+import type { UsageService } from '../usage/usageService'
 import {
   classifyTool,
   decide,
@@ -139,6 +140,8 @@ export interface CoworkServiceDeps {
   configDir: string
   /** パッケージ化したアプリでの claude.exe のパス */
   executablePath?: string
+  /** 上限の確認と概算コスト（USG）。テストでは省略できる */
+  usage?: Pick<UsageService, 'check' | 'estimate'>
   /** テストで Agent SDK を差し替える */
   loadSdk?: () => Promise<Pick<AgentSdk, 'query' | 'tool' | 'createSdkMcpServer'>>
 }
@@ -152,6 +155,30 @@ interface Run {
   controller: AbortController
   query: Query | null
   done: Promise<void>
+}
+
+/** Agent SDK の累計（モデル別） */
+type ModelTotals = Record<
+  string,
+  { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }
+>
+
+export interface RunUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read: number
+  cache_write: number
+  cost: number
+  /** 実行終了時点の累計（次の実行の基準にする） */
+  total: ModelTotals
+}
+
+function parseTotals(raw: string | null | undefined): ModelTotals {
+  try {
+    return raw ? (JSON.parse(raw) as ModelTotals) : {}
+  } catch {
+    return {}
+  }
 }
 
 function parseList(raw: string | null): ToolCategory[] {
@@ -375,6 +402,8 @@ export class CoworkService {
       thread.model
     )
     if (!model) throw new ValidationError('モデルが選択されていません。')
+    // USG-04: 上限に達していれば停止する
+    this.deps.usage?.check(project.id)
     return { thread, project, model, workRoot: project.work_folder }
   }
 
@@ -428,9 +457,15 @@ export class CoworkService {
   }
 
   private toPublic(record: ops.MessageRecord): Message {
-    const { content_blocks: _blocks, agent_resume_uuid: _resume, ...rest } = record
+    const {
+      content_blocks: _blocks,
+      agent_resume_uuid: _resume,
+      agent_usage_total: _total,
+      ...rest
+    } = record
     void _blocks
     void _resume
+    void _total
     return { ...rest, thinking: null, attachments: [] }
   }
 
@@ -450,6 +485,14 @@ export class CoworkService {
       status: 'streaming',
       model
     })
+    // SDK の累計は再開したセッションの以前の分を含むため、再開位置（直前の応答）の累計を基準にする
+    const baseline = resume.resume
+      ? parseTotals(
+          user.parent_id ? ops.getMessage(this.deps.db, user.parent_id)?.agent_usage_total : null
+        )
+      : {}
+    // USG-04: 実行中に上限に達したら中断する（SDK の予算上限。ターン単位のため厳密ではない）
+    const budget = this.deps.usage?.check(project.id).remainingUsd ?? null
     const controller = new AbortController()
     const run: Run = { controller, query: null, done: Promise.resolve() }
     run.done = this.execute(
@@ -460,7 +503,9 @@ export class CoworkService {
       user.content,
       model,
       workRoot,
-      resume
+      resume,
+      baseline,
+      budget
     )
       .catch((error) => {
         console.error('[cowork] unexpected failure:', (error as Error).message)
@@ -525,7 +570,9 @@ export class CoworkService {
     prompt: string,
     model: string,
     workRoot: string,
-    resume: Pick<Options, 'resume' | 'resumeSessionAt' | 'forkSession'>
+    resume: Pick<Options, 'resume' | 'resumeSessionAt' | 'forkSession'>,
+    baseline: ModelTotals,
+    budget: number | null
   ): Promise<void> {
     const { db, emit } = this.deps
     const apiKey = this.deps.getApiKey()
@@ -629,6 +676,7 @@ export class CoworkService {
         append: this.systemAppend(project, workRoot)
       },
       ...(this.deps.executablePath ? { pathToClaudeCodeExecutable: this.deps.executablePath } : {}),
+      ...(budget !== null ? { maxBudgetUsd: budget } : {}),
       ...resume
     }
 
@@ -674,13 +722,8 @@ export class CoworkService {
             emit({ type: 'text', threadId, messageId: assistantId, text: '\n\n' })
           }
         } else if (message.type === 'result') {
-          const usage = {
-            input_tokens: message.usage.input_tokens ?? 0,
-            output_tokens: message.usage.output_tokens ?? 0,
-            cache_read: message.usage.cache_read_input_tokens ?? 0,
-            cache_write: message.usage.cache_creation_input_tokens ?? 0,
-            cost: message.total_cost_usd
-          }
+          const usage = this.runUsage(message.modelUsage ?? {}, baseline)
+          if (message.subtype === 'error_max_budget_usd') errorKind = 'budget'
           const content = texts.join('\n\n')
           if (message.subtype === 'success' && !message.is_error) {
             return this.finish(
@@ -887,6 +930,60 @@ export class CoworkService {
     return null
   }
 
+  /**
+   * この実行の使用量（累計と基準の差分）と概算コスト（USG-01、USG-05: アプリの単価表で計算する）
+   */
+  private runUsage(
+    modelUsage: Record<
+      string,
+      {
+        inputTokens: number
+        outputTokens: number
+        cacheReadInputTokens: number
+        cacheCreationInputTokens: number
+        costUSD: number
+      }
+    >,
+    baseline: ModelTotals
+  ): RunUsage {
+    const total: ModelTotals = {}
+    const result: RunUsage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read: 0,
+      cache_write: 0,
+      cost: 0,
+      total
+    }
+    for (const [model, u] of Object.entries(modelUsage)) {
+      total[model] = {
+        input: u.inputTokens ?? 0,
+        output: u.outputTokens ?? 0,
+        cacheRead: u.cacheReadInputTokens ?? 0,
+        cacheWrite: u.cacheCreationInputTokens ?? 0,
+        cost: u.costUSD ?? 0
+      }
+      const base = baseline[model]
+      // 基準より少ない場合は、新しいセッションとして数え直す
+      const reset = base && total[model].input + total[model].output < base.input + base.output
+      const d = (key: keyof ModelTotals[string]): number =>
+        Math.max(0, total[model][key] - (base && !reset ? base[key] : 0))
+      const delta = {
+        input_tokens: d('input'),
+        output_tokens: d('output'),
+        cache_read_input_tokens: d('cacheRead'),
+        cache_creation_input_tokens: d('cacheWrite')
+      }
+      result.input_tokens += delta.input_tokens
+      result.output_tokens += delta.output_tokens
+      result.cache_read += delta.cache_read_input_tokens
+      result.cache_write += delta.cache_creation_input_tokens
+      // 単価表に無いモデルは SDK の概算を使う
+      result.cost += this.deps.usage?.estimate(model, delta) ?? d('cost')
+    }
+    return result
+  }
+
   private finish(
     project: Project,
     threadId: string,
@@ -895,16 +992,13 @@ export class CoworkService {
     content: string,
     errorKind: ApiErrorKind | null,
     resumeUuid: string | null,
-    usage: {
-      input_tokens: number
-      output_tokens: number
-      cache_read: number
-      cache_write: number
-      cost: number
-    } | null
+    usage: RunUsage | null
   ): void {
     const { db } = this.deps
-    if (usage && usage.cost > 0) {
+    if (
+      usage &&
+      usage.input_tokens + usage.output_tokens + usage.cache_read + usage.cache_write > 0
+    ) {
       ops.insertUsageRecord(db, {
         project_id: project.id,
         project_name: project.name,
@@ -927,9 +1021,14 @@ export class CoworkService {
         : null,
       estimated_cost: usage?.cost ?? null
     })
-    db.prepare('UPDATE messages SET agent_resume_uuid = ? WHERE id = ?').run(
+    db.prepare('UPDATE messages SET agent_resume_uuid = ?, agent_usage_total = ? WHERE id = ?').run(
       resumeUuid,
+      usage ? JSON.stringify(usage.total) : null,
       assistantId
+    )
+    // 10.2: 実行の成否を記録する（本文は含めない）
+    console.info(
+      `[cowork] run ${status}: tokens=${usage ? usage.input_tokens + usage.output_tokens : 0}${errorKind ? ` error=${errorKind}` : ''}`
     )
     const message = this.toPublic(ops.getMessage(db, assistantId)!)
     // 完了の通知を受けてすぐ Undo・次の指示ができるよう、通知より先に「実行中」を解除する

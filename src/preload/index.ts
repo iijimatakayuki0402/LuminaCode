@@ -87,6 +87,14 @@ const api: LuminaApi = {
     getPrefs: invoke('cowork:getPrefs'),
     setPrefs: invoke('cowork:setPrefs')
   },
+  usage: {
+    status: invoke('usage:status'),
+    summary: invoke('usage:summary'),
+    threadTotals: invoke('usage:threadTotals'),
+    getLimits: invoke('usage:getLimits'),
+    setLimits: invoke('usage:setLimits'),
+    setProjectLimit: invoke('usage:setProjectLimit')
+  },
   logs: {
     search: invoke('logs:search'),
     export: invoke('logs:export'),

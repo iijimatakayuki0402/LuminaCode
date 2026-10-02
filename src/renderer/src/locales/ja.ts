@@ -1,6 +1,10 @@
 /**
  * 画面の文言（要件 10.3: 将来の多言語化に備えてリソースとして分離する）
  */
+/** 金額の表示（少額でも 0 にならないよう、大きさに応じて桁数を変える） */
+const formatUsd = (usd: number): string =>
+  usd === 0 ? '0' : usd >= 1 ? usd.toFixed(2) : usd >= 0.01 ? usd.toFixed(4) : usd.toPrecision(2)
+
 export const ja = {
   common: {
     save: '保存',
@@ -165,7 +169,7 @@ export const ja = {
     offline: 'オフラインです。接続が回復すると送信できます。',
     empty: '最初のメッセージを送信してください。',
     tokens: (n: number) => `${n.toLocaleString()} tokens`,
-    cost: (usd: number) => `約 $${usd.toFixed(4)}`,
+    cost: (usd: number) => `約 $${formatUsd(usd)}`,
     coworkComingSoon: 'Cowork の実行は次の段階で実装します。',
     sendKey: '送信キー',
     sendKeys: { enter: 'Enter で送信', ctrl_enter: 'Ctrl+Enter で送信' }
@@ -286,6 +290,47 @@ export const ja = {
     purgeMessage: (days: number) =>
       `${days} 日より前に退避したファイルを完全に削除します。元に戻せません。`,
     purged: (n: number) => `${n} 回分の退避を完全に削除しました。`
+  },
+  usage: {
+    nav: '使用量',
+    title: 'USAGE',
+    month: '月',
+    disclaimer:
+      'コストは単価表に基づく概算です。実際の請求額とは異なります。正確な金額は Anthropic のコンソールで確認してください。',
+    total: '当月の合計',
+    tokens: (input: number, output: number) =>
+      `入力 ${input.toLocaleString()} / 出力 ${output.toLocaleString()} tokens`,
+    requests: (n: number) => `${n.toLocaleString()} 回`,
+    cost: (usd: number) => `約 $${formatUsd(usd)}`,
+    ofLimit: (usd: number, limit: number) => `約 $${formatUsd(usd)} / 上限 $${formatUsd(limit)}`,
+    noLimit: '上限なし',
+    byProject: 'プロジェクト別（当月）',
+    byMonth: '月別の推移',
+    project: 'プロジェクト',
+    costColumn: '概算コスト',
+    tokensColumn: 'トークン',
+    projectLimit: '上限（USD / 月）',
+    setLimit: '設定',
+    clearLimit: '解除',
+    none: 'まだ使用量はありません。',
+    warning: (percent: number) => `使用量が上限の ${percent}% に達しています。`,
+    exceededStop:
+      '使用量が上限に達したため、新しいリクエストを停止しています。上限を引き上げるか、解除してください。',
+    exceededWarn: '使用量が上限を超えています（設定により警告のみ）。',
+    threadTotal: (tokens: number, usd: number) =>
+      `スレッド累計 ${tokens.toLocaleString()} tokens・約 $${formatUsd(usd)}`,
+    settings: '使用量の上限',
+    monthlyLimit: '月額上限（USD。空欄で上限なし）',
+    action: '上限に達したとき',
+    actions: { stop: '新しいリクエストを停止する（推奨）', warn: '警告のみ' },
+    saved: '保存しました。',
+    pricingFile: (path: string) => `単価表のファイル: ${path}`,
+    pricingNote: '単価表は JSON ファイルを編集して更新できます（次のリクエストから反映）。'
+  },
+  data: {
+    section: 'データ',
+    dataPath: (path: string) => `データ保存先: ${path}`,
+    logPath: (path: string) => `アプリログ: ${path}`
   },
   appearance: {
     section: '表示',

@@ -109,8 +109,8 @@ export function ChatView({
         })
         // 停止した実行の確認待ちは main 側で拒否済み
         setPermissions([])
-        // Cowork: 「常に許可」の表示などを更新する
-        if (cowork) onThreadChangedRef.current()
+        // 使用量の累計・上限の警告、Cowork の「常に許可」の表示を更新する
+        onThreadChangedRef.current()
         if (event.errorMessage) setError(event.errorMessage)
         return
       }
