@@ -7,6 +7,7 @@ import { TypeBadge } from '../components/TypeBadge'
 import { unwrap } from '../lib/ipc'
 import { useModels } from '../lib/useModels'
 import { ChatView } from './ChatView'
+import { TrashDialog } from '../components/CoworkParts'
 import { ja } from '../locales/ja'
 
 const threadTitle = (thread: Thread): string => thread.title ?? ja.project.untitled
@@ -26,6 +27,7 @@ export function ProjectScreen({
 }): React.JSX.Element {
   const [project, setProject] = useState(initialProject)
   const [always, setAlways] = useState<AlwaysAllowRules>({ thread: [], project: [] })
+  const [trashOpen, setTrashOpen] = useState(false)
   const [threads, setThreads] = useState<Thread[] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
@@ -157,9 +159,14 @@ export function ProjectScreen({
         <TypeBadge type={project.type} />
         <h1>{project.name}</h1>
         {project.type === 'cowork' && (
-          <span className="card-path" title={ja.project.workFolder}>
-            {project.work_folder}
-          </span>
+          <>
+            <span className="card-path" title={ja.project.workFolder}>
+              {project.work_folder}
+            </span>
+            <button className="btn btn-sm" type="button" onClick={() => setTrashOpen(true)}>
+              {ja.trash.open}
+            </button>
+          </>
         )}
       </div>
 
@@ -297,6 +304,8 @@ export function ProjectScreen({
           )}
         </section>
       </div>
+
+      {trashOpen && <TrashDialog projectId={project.id} onClose={() => setTrashOpen(false)} />}
 
       {deleting && (
         <ConfirmDialog

@@ -253,6 +253,7 @@ body {
   gap: 0.35rem;
   align-items: center;
   font-size: 0.9rem;
+  white-space: nowrap;
 }
 
 /* プロジェクトカード */
@@ -886,4 +887,40 @@ dialog.dialog.danger .dialog-head {
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
+}
+
+/* 操作ログ（LOG-02） */
+.log-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.log-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8rem;
+}
+.log-table th,
+.log-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.log-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 600;
+}
+.log-table tr.denied td {
+  color: var(--danger);
+}
+.log-result {
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

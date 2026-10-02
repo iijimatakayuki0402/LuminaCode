@@ -68,4 +68,5 @@ scripts/     環境構築・運用スクリプト
 - `better-sqlite3`（v13）は N-API 版の同梱バイナリ（`prebuilds/`）を使うため、Node と Electron の両方でそのまま動きます（再ビルド不要）。本番と同じランタイムで確認したい場合は `npm run test:electron` を使います。
 - API キーは `.env` に書かず、アプリの設定画面から登録します（DPAPI で暗号化保存）。
 - API キーの暗号化に使う鍵は、データ保存先の `Local State` に（DPAPI で保護されて）保存されます。`api-key.bin` だけを別の場所へコピーしても復号できません。バックアップ・復元を実装する際は注意してください。
+- Cowork は Agent SDK（同梱の `claude.exe`）を作業フォルダで実行します。SDK の設定・セッションはデータ保存先の `agent\` に保存し、ユーザーの `~/.claude` や作業フォルダの `.claude\settings.json`（hooks など）は読み込みません。すべてのツール実行はアプリの PreToolUse フックで判定します（`src/main/cowork/policy.ts`）。
 - 開発時（パッケージ化していない場合）は、環境変数 `LUMINA_USER_DATA_DIR` でデータ保存先を切り替えられます（動作確認で本来のデータを汚さないため）。

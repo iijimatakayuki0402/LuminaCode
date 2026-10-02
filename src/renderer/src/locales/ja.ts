@@ -241,6 +241,52 @@ export const ja = {
     allowCommands: '確認なしで許可するコマンド（1 行に 1 つ。末尾の * で前方一致）',
     prefsSaved: '保存しました。'
   },
+  logs: {
+    title: 'OPERATION LOG',
+    nav: '操作ログ',
+    project: 'プロジェクト',
+    allProjects: 'すべてのプロジェクト',
+    category: '種別',
+    allCategories: 'すべての種別',
+    query: '対象・コマンドで検索',
+    from: '開始日',
+    to: '終了日',
+    search: '検索',
+    exportCsv: 'CSV で書き出す',
+    exportJson: 'JSON で書き出す',
+    exported: (path: string) => `書き出しました: ${path}`,
+    columns: {
+      time: '日時',
+      project: 'プロジェクト',
+      tool: '操作',
+      target: '対象',
+      method: '許可方法',
+      result: '結果'
+    },
+    empty: '該当するログはありません。',
+    count: (n: number) => `${n.toLocaleString()} 件`,
+    limitNote: (n: number) => `新しい順に ${n.toLocaleString()} 件まで表示しています。`,
+    retention: (days: number) =>
+      `ログは ${days} 日間保持し、それより古いものは起動時に削除します。`,
+    deleteOld: '指定した終了日より前のログを削除',
+    deleteTitle: '操作ログの削除',
+    deleteMessage: (date: string) => `${date} より前の操作ログを削除します。元に戻せません。`,
+    deleted: (n: number) => `${n.toLocaleString()} 件を削除しました。`,
+    needTo: '削除するには終了日を指定してください。'
+  },
+  trash: {
+    open: '退避したファイル',
+    title: '退避したファイル（.lumina-trash）',
+    empty: '退避したファイルはありません。',
+    deletedAt: '削除日時',
+    restore: '復元',
+    restored: (path: string) => `復元しました: ${path}`,
+    purge: (days: number) => `${days} 日より前のものを完全に削除`,
+    purgeTitle: '退避したファイルの完全削除',
+    purgeMessage: (days: number) =>
+      `${days} 日より前に退避したファイルを完全に削除します。元に戻せません。`,
+    purged: (n: number) => `${n} 回分の退避を完全に削除しました。`
+  },
   appearance: {
     section: '表示',
     mode: '表示モード',

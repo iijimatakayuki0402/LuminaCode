@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   FileChange,
   FileDiff,
   PermissionRequest,
   PermissionResponse,
   TodoItem,
-  ToolEventInfo
+  ToolEventInfo,
+  TrashEntry
 } from '@shared/types'
 import { diffLines } from '../lib/diff'
 import { unwrap } from '../lib/ipc'
@@ -313,5 +314,119 @@ export function TodoPanel({ todos }: { todos: TodoItem[] }): React.JSX.Element |
         ))}
       </ul>
     </aside>
+  )
+}
+
+/** 退避の保持期間（SEC-11） */
+const TRASH_RETENTION_DAYS = 30
+
+/**
+ * 退避したファイルの一覧・復元・完全削除（SEC-11）
+ */
+export function TrashDialog({
+  projectId,
+  onClose
+}: {
+  projectId: string
+  onClose: () => void
+}): React.JSX.Element {
+  const [entries, setEntries] = useState<TrashEntry[] | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [confirmPurge, setConfirmPurge] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.cowork.trashList(projectId))
+      .then((list) => active && setEntries(list))
+      .catch((e: unknown) => active && setMessage((e as Error).message))
+    return () => {
+      active = false
+    }
+  }, [projectId])
+
+  const reload = async (): Promise<void> => {
+    setEntries(await unwrap(window.lumina.cowork.trashList(projectId)))
+  }
+
+  const restore = async (entry: TrashEntry): Promise<void> => {
+    try {
+      const path = await unwrap(window.lumina.cowork.trashRestore(projectId, entry.id))
+      setMessage(ja.trash.restored(path))
+      await reload()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
+  const purge = async (): Promise<void> => {
+    setConfirmPurge(false)
+    try {
+      const count = await unwrap(window.lumina.cowork.trashPurge(projectId, TRASH_RETENTION_DAYS))
+      setMessage(ja.trash.purged(count))
+      await reload()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
+  return (
+    <>
+      <Dialog
+        title={ja.trash.title}
+        onClose={onClose}
+        footer={
+          <>
+            <button className="btn btn-danger" type="button" onClick={() => setConfirmPurge(true)}>
+              {ja.trash.purge(TRASH_RETENTION_DAYS)}
+            </button>
+            <button className="btn" type="button" onClick={onClose} autoFocus>
+              {ja.common.back}
+            </button>
+          </>
+        }
+      >
+        {entries === null ? (
+          <p className="muted">{ja.common.loading}</p>
+        ) : entries.length === 0 ? (
+          <p className="hint">{ja.trash.empty}</p>
+        ) : (
+          <table className="target-table">
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id}>
+                  <td className="mono">
+                    {e.originalPath}
+                    {e.isFolder ? '\\' : ''}
+                  </td>
+                  <td className="mono">{formatSize(e.size_bytes)}</td>
+                  <td className="mono">
+                    {new Date(e.deletedAt).toLocaleString('ja-JP', {
+                      dateStyle: 'short',
+                      timeStyle: 'short'
+                    })}
+                  </td>
+                  <td>
+                    <button className="btn btn-sm" type="button" onClick={() => void restore(e)}>
+                      {ja.trash.restore}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {message && <p className="hint">{message}</p>}
+      </Dialog>
+      {confirmPurge && (
+        <ConfirmDialog
+          danger
+          title={ja.trash.purgeTitle}
+          confirmLabel={ja.trash.purge(TRASH_RETENTION_DAYS)}
+          message={<p>{ja.trash.purgeMessage(TRASH_RETENTION_DAYS)}</p>}
+          onCancel={() => setConfirmPurge(false)}
+          onConfirm={() => void purge()}
+        />
+      )}
+    </>
   )
 }

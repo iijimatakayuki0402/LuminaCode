@@ -58,7 +58,12 @@ import {
   undoRun,
   type UndoResult
 } from './snapshot'
-import { finishToolEvent, insertToolEvent, listToolEventsByThread } from './toolEvents'
+import {
+  finishToolEvent,
+  insertToolEvent,
+  listToolEventsByThread,
+  summarizeToolResponse
+} from './toolEvents'
 import { moveToTrash, sizeOf } from './trash'
 
 const { ValidationError } = ops
@@ -587,9 +592,7 @@ export class CoworkService {
         const event = finishToolEvent(
           db,
           input.tool_use_id,
-          typeof input.tool_response === 'string'
-            ? input.tool_response
-            : JSON.stringify(input.tool_response ?? null)
+          summarizeToolResponse(input.tool_name, input.tool_response)
         )
         if (event) emit({ type: 'tool', threadId, messageId: assistantId, event })
       } else if (input.hook_event_name === 'PostToolUseFailure') {

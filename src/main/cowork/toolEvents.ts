@@ -18,6 +18,37 @@ export function summarize(value: unknown): string {
   return text.length > RESULT_SUMMARY_LENGTH ? `${text.slice(0, RESULT_SUMMARY_LENGTH)}…` : text
 }
 
+/**
+ * ツールの実行結果を、操作ログで読める形に要約する（SEC-25: コマンドは出力の要約を残す）
+ */
+export function summarizeToolResponse(toolName: string, response: unknown): string {
+  if (typeof response === 'string') return response
+  // MCP ツール（削除ツールなど）: 本文だけを取り出す
+  if (Array.isArray(response)) {
+    const texts = response
+      .map((b) =>
+        b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : ''
+      )
+      .filter(Boolean)
+    if (texts.length > 0) return texts.join('\n')
+  }
+  if (response && typeof response === 'object') {
+    const r = response as Record<string, unknown>
+    // コマンド: 出力（標準出力・標準エラー）
+    if ('stdout' in r || 'stderr' in r) {
+      const out = [r['stdout'], r['stderr']]
+        .filter((v) => typeof v === 'string' && v.trim())
+        .join('\n')
+      return r['interrupted'] ? `（中断）${out}` : out || '（出力なし）'
+    }
+    // ファイル操作: 作成・更新・読み取りの完了だけを記録する（内容は残さない）
+    if (['Write', 'Edit', 'NotebookEdit', 'Read'].includes(toolName)) {
+      return typeof r['type'] === 'string' ? `完了（${r['type']}）` : '完了'
+    }
+  }
+  return JSON.stringify(response ?? null)
+}
+
 export function insertToolEvent(
   db: Database.Database,
   input: {
