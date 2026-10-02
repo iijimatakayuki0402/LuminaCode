@@ -74,7 +74,7 @@ scripts/     環境構築・運用スクリプト
 
 ## 更新の配信（CMN-03）
 
-- 配信元は GitHub Releases の公開リポジトリ [iijimatakayuki0402/CChatProject](https://github.com/iijimatakayuki0402/CChatProject) です（リリース専用で、ソースは置きません。アプリにトークンは持たせません）。設定は `electron-builder.yml` の `publish` にあります。
+- 配信元は GitHub Releases の公開リポジトリ [iijimatakayuki0402/LuminaCode](https://github.com/iijimatakayuki0402/LuminaCode) です（リリース専用で、ソースは置きません。アプリにトークンは持たせません）。設定は `electron-builder.yml` の `publish` にあります。
 - 更新は起動の 10 秒後と、設定画面の「更新を確認」で確認します（パッケージ版のみ）。ダウンロードとインストール（再起動）は、どちらもユーザーが操作したときだけ行います。
 - リリースの手順:
   1. `package.json` の `version` を上げる（例: `0.1.0` → `0.2.0`）。
