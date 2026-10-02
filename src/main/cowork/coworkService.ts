@@ -485,12 +485,16 @@ export class CoworkService {
       status: 'streaming',
       model
     })
-    // SDK の累計は再開したセッションの以前の分を含むため、再開位置（直前の応答）の累計を基準にする
-    const baseline = resume.resume
-      ? parseTotals(
-          user.parent_id ? ops.getMessage(this.deps.db, user.parent_id)?.agent_usage_total : null
-        )
-      : {}
+    // SDK の累計は再開したセッションの以前の分を含む。分岐（fork）した場合も、巻き戻した位置ではなく
+    // 元のセッション全体の累計から続く（実 API で確認）。そのため、スレッドで最後に実行した回の累計を基準にする
+    const latest = this.deps.db
+      .prepare(
+        `SELECT agent_usage_total FROM messages
+         WHERE thread_id = ? AND agent_usage_total IS NOT NULL
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`
+      )
+      .get(thread.id) as { agent_usage_total: string } | undefined
+    const baseline = resume.resume ? parseTotals(latest?.agent_usage_total) : {}
     // USG-04: 実行中に上限に達したら中断する（SDK の予算上限。ターン単位のため厳密ではない）
     const budget = this.deps.usage?.check(project.id).remainingUsd ?? null
     const controller = new AbortController()

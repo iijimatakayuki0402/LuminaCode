@@ -414,4 +414,23 @@ describe('中断と再開（COW-06、CHT-14）', () => {
     expect(rows[1].estimated_cost).toBeCloseTo(0.0123, 6)
     expect(ops.getMessage(db, second)!.estimated_cost).toBeCloseTo(0.0123, 6)
   })
+
+  it('編集して再実行（分岐）でも、その実行の分だけを記録する', async () => {
+    setup([{ text: '1' }, { text: '2' }, { text: '2改' }])
+    await send('1回目')
+    await send('2回目')
+    const path = activePath(ops.listMessagesByThread(db, threadId))
+    service.editAndResend({
+      userMessageId: path[2].id,
+      content: '2回目（修正）',
+      keepAttachmentIds: [],
+      attachmentIds: []
+    })
+    await service.whenIdle(threadId)
+
+    const rows = db
+      .prepare('SELECT input_tokens FROM usage_records ORDER BY created_at, rowid')
+      .all() as { input_tokens: number }[]
+    expect(rows.map((r) => r.input_tokens)).toEqual([1000, 1000, 1000])
+  })
 })
