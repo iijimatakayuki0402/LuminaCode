@@ -16,6 +16,7 @@ import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
 import { getGlobalInstructions, setGlobalInstructions } from '../settings/instructions'
 import { deleteSnippet, listSnippets, saveSnippet } from '../settings/snippets'
 import { deleteTemplate, listTemplates, saveTemplateFromProject } from '../settings/templates'
+import { createFullBackup, inspectFullBackup, scheduleRestore } from '../data/fullBackup'
 import { leafFrom } from '@shared/conversation'
 import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
@@ -62,6 +63,9 @@ export interface HandlerDeps {
   workFolderPolicy: WorkFolderPolicy
   /** フォルダ選択ダイアログを表示する（Electron 依存のため外から渡す） */
   selectFolder: (defaultPath?: string) => Promise<string | null>
+  /** EXP-03: データ保存先と、復元のための再起動（生成中の応答を保存してから） */
+  userData?: string
+  relaunch?: () => Promise<void>
   /** ファイル選択ダイアログを表示する（複数選択。キャンセル時は空） */
   selectFiles: () => Promise<string[]>
   chatService: ChatService
@@ -118,6 +122,8 @@ export function createHandlers({
   createClient,
   workFolderPolicy,
   selectFolder,
+  userData,
+  relaunch,
   selectFiles,
   chatService,
   coworkService,
@@ -414,6 +420,20 @@ export function createHandlers({
     },
     'backup:now': () => backupNow(db, backupDir),
     'backup:list': () => listBackups(backupDir),
+    'fullBackup:create': async () => {
+      if (!userData) throw new ops.ValidationError('全データのバックアップは使えません。')
+      const dest = await selectFolder()
+      return dest ? createFullBackup(db, userData, dest, appInfo.version) : null
+    },
+    'fullBackup:select': async () => {
+      const dir = await selectFolder()
+      return dir ? inspectFullBackup(dir) : null
+    },
+    'fullBackup:restore': async (path) => {
+      if (!userData || !relaunch) throw new ops.ValidationError('全データの復元は使えません。')
+      scheduleRestore(userData, v.str(path, 'path'))
+      await relaunch()
+    },
 
     'logs:search': (filter) => searchToolEvents(db, v.toolEventFilter(filter, 'filter')),
     'logs:export': (filter, format) => {

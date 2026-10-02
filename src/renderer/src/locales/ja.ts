@@ -375,6 +375,19 @@ export const ja = {
     logNote:
       '操作ログ（Cowork のツール実行の記録）は、操作ログの画面で期間を指定して削除できます。アプリログには会話の内容や API キーは含まれません。'
   },
+  fullBackup: {
+    title: '全データのバックアップと復元',
+    note: 'すべてのプロジェクト・会話・添付ファイル・Cowork の退避データ・設定を、選んだフォルダにまとめて保存します。PC の買い替えなどで別の環境へ移すときにも使えます。API キーは含まれないため、復元した後に設定画面で登録してください。バックアップには会話の内容が含まれるため、保管場所に注意してください。',
+    create: '全データをバックアップ',
+    restore: 'バックアップから復元',
+    created: (path: string) => `全データをバックアップしました: ${path}`,
+    confirmTitle: 'バックアップから復元',
+    summary: (date: string, version: string, projects: number) =>
+      `作成日時: ${date} / アプリ: ${version || '不明'} / プロジェクト: ${projects} 件`,
+    confirmLead:
+      '今のデータは、このバックアップの内容に置き換わります（今のデータは、データ保存先の backups フォルダに残します）。復元するとアプリが再起動します。生成中の応答は停止します。',
+    confirm: '復元して再起動'
+  },
   templates: {
     saveButton: 'テンプレート化',
     saveTitle: 'テンプレートとして保存',

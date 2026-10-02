@@ -19,6 +19,7 @@ import { parseWindowState, restoreBounds, WINDOW_STATE_KEY } from './windowState
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
 import { runDailyBackup } from './data/backup'
+import { applyPendingRestore } from './data/fullBackup'
 import { getCoworkSettings } from './cowork/extensions'
 import { UsageService } from './usage/usageService'
 import { UpdateService } from './update/updateService'
@@ -173,7 +174,17 @@ function resolveClaudeExecutable(): string | undefined {
 /**
  * DB を開き、IPC を登録する。失敗した場合はメッセージを表示して false を返す
  */
+/** EXP-03: 予約された復元の結果（起動後に知らせる） */
+let restoreResult: ReturnType<typeof applyPendingRestore> = { status: 'none' }
+
 function setupBackend(): boolean {
+  // EXP-03: 予約された復元は、DB を開く前に行う
+  restoreResult = applyPendingRestore(app.getPath('userData'))
+  if (restoreResult.status === 'failed') {
+    console.error('[restore] failed:', restoreResult.error)
+  } else if (restoreResult.status === 'restored') {
+    console.info('[restore] restored; previous data kept in', restoreResult.previous)
+  }
   let db
   try {
     db = getDatabase()
@@ -360,6 +371,13 @@ function setupBackend(): boolean {
         homeDir: homedir(),
         systemRoot: process.env['SystemRoot'] ?? 'C:\\Windows'
       },
+      userData: app.getPath('userData'),
+      // EXP-03: 復元は次の起動時に行うため、生成中の応答を保存してから再起動する
+      relaunch: async () => {
+        await stopAllRuns()
+        app.relaunch()
+        app.quit()
+      },
       selectFolder: async (defaultPath) => {
         const owner = BrowserWindow.getFocusedWindow()
         const options: Electron.OpenDialogOptions = {
@@ -394,6 +412,19 @@ void app.whenReady().then(() => {
   }
 
   createWindow()
+  if (restoreResult.status === 'restored') {
+    void dialog.showMessageBox({
+      type: 'info',
+      title: 'Lumina Code',
+      message: 'バックアップからデータを復元しました。',
+      detail: `復元前のデータは次の場所に残しています。\n${restoreResult.previous}\n\nAPI キーは復元の対象外です。必要に応じて設定画面で登録してください。`
+    })
+  } else if (restoreResult.status === 'failed') {
+    dialog.showErrorBox(
+      'Lumina Code',
+      `データを復元できなかったため、今までのデータのまま起動しました。\n${restoreResult.error}`
+    )
+  }
   // 10.4: 起動時に更新を確認する（起動を遅らせないよう、少し待ってから。配信元が未設定なら何もしない）
   setTimeout(() => void updateService?.check(), 10_000)
   app.on('activate', () => {

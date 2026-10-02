@@ -50,6 +50,7 @@ import type {
   UsageTotals,
   UpdateProjectInput,
   UpdateThreadInput,
+  FullBackupPreview,
   ProjectTemplate,
   Snippet,
   SnippetInput
@@ -203,6 +204,12 @@ export interface IpcContract {
   /** DB のバックアップ（10.2） */
   'backup:now': { args: []; result: BackupInfo }
   'backup:list': { args: []; result: BackupInfo[] }
+  /** 全データのバックアップ（EXP-03）。保存先のフォルダを選ぶ（キャンセル時は null） */
+  'fullBackup:create': { args: []; result: string | null }
+  /** 復元するバックアップのフォルダを選び、内容を確かめる（キャンセル時は null） */
+  'fullBackup:select': { args: []; result: FullBackupPreview | null }
+  /** 復元を予約してアプリを再起動する */
+  'fullBackup:restore': { args: [path: string]; result: void }
 
   /** 操作ログ（LOG-02、LOG-03） */
   'logs:search': { args: [filter: ToolEventFilter]; result: ToolEventRow[] }
@@ -383,6 +390,9 @@ export interface LuminaApi {
     importConfirm: Invoke<'import:confirm'>
     backupNow: Invoke<'backup:now'>
     backupList: Invoke<'backup:list'>
+    fullBackupCreate: Invoke<'fullBackup:create'>
+    fullBackupSelect: Invoke<'fullBackup:select'>
+    fullBackupRestore: Invoke<'fullBackup:restore'>
   }
   logs: {
     search: Invoke<'logs:search'>

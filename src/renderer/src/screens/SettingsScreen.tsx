@@ -6,6 +6,7 @@ import type {
   ApiKeyStatus,
   Appearance,
   BackupInfo,
+  FullBackupPreview,
   ChatPrefs,
   LicenseList,
   ModelList,
@@ -499,7 +500,95 @@ function BackupSection(): React.JSX.Element {
         {ja.backup.now}
       </button>
       <Message message={message} />
+      <FullBackupPanel />
     </section>
+  )
+}
+
+/**
+ * 全データのバックアップと復元（EXP-03）
+ */
+function FullBackupPanel(): React.JSX.Element {
+  const [message, setMessage] = useState<MessageState | null>(null)
+  const [preview, setPreview] = useState<FullBackupPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const create = async (): Promise<void> => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const path = await unwrap(window.lumina.data.fullBackupCreate())
+      if (path) setMessage({ tone: 'info', text: ja.fullBackup.created(path) })
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+    setBusy(false)
+  }
+
+  const select = async (): Promise<void> => {
+    setMessage(null)
+    try {
+      const p = await unwrap(window.lumina.data.fullBackupSelect())
+      if (p) setPreview(p)
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  const restore = async (path: string): Promise<void> => {
+    setPreview(null)
+    setBusy(true)
+    try {
+      // 成功するとアプリが再起動する
+      await unwrap(window.lumina.data.fullBackupRestore(path))
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <h3 className="subhead">{ja.fullBackup.title}</h3>
+      <p className="hint">{ja.fullBackup.note}</p>
+      <div className="row">
+        <button className="btn" type="button" disabled={busy} onClick={() => void create()}>
+          {ja.fullBackup.create}
+        </button>
+        <button
+          className="btn btn-danger"
+          type="button"
+          disabled={busy}
+          onClick={() => void select()}
+        >
+          {ja.fullBackup.restore}
+        </button>
+      </div>
+      <Message message={message} />
+      {preview && (
+        <ConfirmDialog
+          title={ja.fullBackup.confirmTitle}
+          confirmLabel={ja.fullBackup.confirm}
+          danger
+          onCancel={() => setPreview(null)}
+          onConfirm={() => void restore(preview.path)}
+          message={
+            <>
+              <p className="mono">
+                {preview.path}
+                <br />
+                {ja.fullBackup.summary(
+                  new Date(preview.created_at).toLocaleString('ja-JP'),
+                  preview.app_version,
+                  preview.projects
+                )}
+              </p>
+              <p>{ja.fullBackup.confirmLead}</p>
+            </>
+          }
+        />
+      )}
+    </>
   )
 }
 

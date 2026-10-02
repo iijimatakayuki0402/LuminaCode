@@ -149,7 +149,10 @@ const api: LuminaApi = {
     importSelect: invoke('import:select'),
     importConfirm: invoke('import:confirm'),
     backupNow: invoke('backup:now'),
-    backupList: invoke('backup:list')
+    backupList: invoke('backup:list'),
+    fullBackupCreate: invoke('fullBackup:create'),
+    fullBackupSelect: invoke('fullBackup:select'),
+    fullBackupRestore: invoke('fullBackup:restore')
   },
   logs: {
     search: invoke('logs:search'),

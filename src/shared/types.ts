@@ -462,6 +462,14 @@ export interface BackupInfo {
   size_bytes: number
 }
 
+/** 全データのバックアップの概要（EXP-03。復元の前に表示する） */
+export interface FullBackupPreview {
+  path: string
+  created_at: number
+  app_version: string
+  projects: number
+}
+
 // ========================================
 // 使用量（要件 USG-01〜05）
 // ========================================
