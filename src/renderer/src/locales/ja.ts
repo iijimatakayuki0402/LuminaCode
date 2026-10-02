@@ -170,6 +170,77 @@ export const ja = {
     sendKey: '送信キー',
     sendKeys: { enter: 'Enter で送信', ctrl_enter: 'Ctrl+Enter で送信' }
   },
+  cowork: {
+    tools: 'ツール実行',
+    category: {
+      read: '読み取り',
+      write: '書き込み',
+      delete: '削除',
+      command: 'コマンド',
+      plan: '計画',
+      web: 'Web',
+      other: 'その他'
+    },
+    method: {
+      auto: '自動許可',
+      allowed_once: '今回だけ許可',
+      allowed_always_thread: 'スレッドで常に許可',
+      allowed_always_project: 'プロジェクトで常に許可',
+      denied: '拒否'
+    },
+    running: '実行中…',
+    permissionTitle: (category: string) => `確認: ${category}`,
+    permissionLead: (tool: string) => `Claude が次の操作（${tool}）を実行しようとしています。`,
+    targets: (n: number) => `対象（${n} 件）`,
+    kind: { file: 'ファイル', folder: 'フォルダ', missing: '新規' },
+    command: '実行するコマンド',
+    detail: '内容',
+    dangerNote: (reason: string) => `注意: ${reason}の操作です。内容をよく確認してください。`,
+    bulkNote: '多数のファイル、またはフォルダの削除のため、毎回確認します。',
+    commandNote:
+      'コマンドの実行は、作業フォルダの外への影響を完全には防げません。内容を確認してから許可してください。',
+    allowOnce: '今回だけ許可',
+    allowThread: 'このスレッドでは常に許可',
+    allowProject: 'このプロジェクトでは常に許可',
+    deny: '拒否',
+    changes: '変更されたファイル',
+    showChanges: (n: number) => `変更を確認（${n} 件）`,
+    hideChanges: '閉じる',
+    changeKind: { modified: '変更', created: '作成', trashed: '削除（退避）' },
+    restored: '元に戻し済み',
+    showDiff: '差分',
+    undo: 'この実行の変更を元に戻す',
+    undoTitle: '変更を元に戻す',
+    undoMessage:
+      'この実行でアプリ経由に行った変更を、実行前の状態に戻します。作成したファイルは .lumina-trash に退避します。',
+    undoDone: (n: number) => `${n} 件を元に戻しました。`,
+    undoSkipped: (items: string) => `元に戻せなかったもの: ${items}`,
+    bashNote:
+      'Bash／PowerShell のコマンドで行われた変更は、元に戻す対象になりません（Git で管理している場合は Git で戻してください）。',
+    diffTitle: (path: string) => `差分: ${path}`,
+    binary: 'テキストではない、または大きすぎるため、差分を表示できません。',
+    noDiff: '変更はありません。',
+    todos: 'TODO',
+    todoStatus: { pending: '未着手', in_progress: '進行中', completed: '完了' },
+    resendTitle: '再送信の前に',
+    resendMessage:
+      '再送信しても、前回の実行で行われたファイルの変更は自動では元に戻りません。前回の変更を元に戻しますか？',
+    resendUndo: '元に戻してから再送信',
+    resendKeep: 'そのまま再送信',
+    noAttachments:
+      'Cowork では添付ファイルは使えません。作業フォルダにファイルを置いて指示してください。',
+    modeLabel: '権限モード',
+    always: '常に許可',
+    alwaysNone: 'なし',
+    alwaysScope: { thread: 'このスレッド', project: 'このプロジェクト' },
+    clear: '解除',
+    commandLimit:
+      'コマンド実行は作業フォルダの外への影響を完全には防げません。重要なフォルダでは「計画のみ」または「毎回確認」をお勧めします。',
+    prefsSection: 'Cowork のコマンド',
+    denyPatterns: '拒否するコマンド（正規表現。1 行に 1 つ）',
+    allowCommands: '確認なしで許可するコマンド（1 行に 1 つ。末尾の * で前方一致）',
+    prefsSaved: '保存しました。'
+  },
   appearance: {
     section: '表示',
     mode: '表示モード',

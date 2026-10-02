@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState } from 'react'
 import { resolveModel } from '@shared/models'
-import type { Project, Thread } from '@shared/types'
+import type { AlwaysAllowRules, PermissionMode, Project, Thread } from '@shared/types'
 import { ConfirmDialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
 import { TypeBadge } from '../components/TypeBadge'
@@ -15,13 +15,17 @@ const threadTitle = (thread: Thread): string => thread.title ?? ja.project.untit
  * プロジェクト画面（要件 6.3 スレッド管理、MDL-03・MDL-04）
  * 会話の送受信は Stage 5 で中央の領域に実装する。
  */
+const PERMISSION_MODES: PermissionMode[] = ['confirm_each', 'auto_edit', 'plan_only']
+
 export function ProjectScreen({
-  project,
+  project: initialProject,
   onBack
 }: {
   project: Project
   onBack: () => void
 }): React.JSX.Element {
+  const [project, setProject] = useState(initialProject)
+  const [always, setAlways] = useState<AlwaysAllowRules>({ thread: [], project: [] })
   const [threads, setThreads] = useState<Thread[] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
@@ -99,6 +103,37 @@ export function ProjectScreen({
     try {
       await unwrap(window.lumina.threads.update(thread.id, { model }))
       await reload()
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  // 6.7: 「常に許可」の表示と解除
+  useEffect(() => {
+    if (project.type !== 'cowork') return
+    let active = true
+    unwrap(window.lumina.cowork.getAlways(project.id, selectedId ?? undefined))
+      .then((rules) => active && setAlways(rules))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [project.id, project.type, selectedId, threads])
+
+  const clearAlways = async (scope: 'thread' | 'project'): Promise<void> => {
+    try {
+      const target = scope === 'thread' ? selectedId : project.id
+      if (!target) return
+      await unwrap(window.lumina.cowork.clearAlways(scope, target))
+      setAlways(await unwrap(window.lumina.cowork.getAlways(project.id, selectedId ?? undefined)))
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  const changeMode = async (mode: PermissionMode): Promise<void> => {
+    try {
+      setProject(await unwrap(window.lumina.projects.update(project.id, { permission_mode: mode })))
     } catch (e) {
       fail(e)
     }
@@ -204,12 +239,27 @@ export function ProjectScreen({
             </span>
             {activeModel && <span className="muted">({modelSource})</span>}
             {project.type === 'cowork' && (
-              <span>
-                {ja.project.permissionMode}:{' '}
-                <strong>{ja.permissionMode[project.permission_mode]}</strong>
-              </span>
+              <>
+                {/* COW-09: 権限モードを切り替える */}
+                <label className="row" style={{ gap: '0.35rem' }}>
+                  {ja.cowork.modeLabel}:
+                  <select
+                    className="select"
+                    value={project.permission_mode}
+                    onChange={(e) => void changeMode(e.target.value as PermissionMode)}
+                  >
+                    {PERMISSION_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {ja.permissionMode[m]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <AlwaysRules always={always} onClear={(scope) => void clearAlways(scope)} />
+              </>
             )}
           </div>
+          {project.type === 'cowork' && <p className="hint">{ja.cowork.commandLimit}</p>}
 
           <Message message={message} />
 
@@ -238,11 +288,11 @@ export function ProjectScreen({
                   ))}
                 </select>
               </div>
-              {project.type === 'chat' ? (
-                <ChatView threadId={selected.id} onThreadChanged={() => void reload()} />
-              ) : (
-                <p className="empty">{ja.chat.coworkComingSoon}</p>
-              )}
+              <ChatView
+                threadId={selected.id}
+                cowork={project.type === 'cowork'}
+                onThreadChanged={() => void reload()}
+              />
             </>
           )}
         </section>
@@ -263,5 +313,32 @@ export function ProjectScreen({
         />
       )}
     </div>
+  )
+}
+
+function AlwaysRules({
+  always,
+  onClear
+}: {
+  always: AlwaysAllowRules
+  onClear: (scope: 'thread' | 'project') => void
+}): React.JSX.Element {
+  const scopes = (['thread', 'project'] as const).filter((s) => always[s].length > 0)
+  return (
+    <span className="row" style={{ gap: '0.5rem' }}>
+      {ja.cowork.always}:
+      {scopes.length === 0 && <span className="muted">{ja.cowork.alwaysNone}</span>}
+      {scopes.map((scope) => (
+        <span key={scope} className="row" style={{ gap: '0.25rem' }}>
+          <span>
+            {ja.cowork.alwaysScope[scope]}（
+            {always[scope].map((c) => ja.cowork.category[c]).join('・')}）
+          </span>
+          <button className="btn btn-sm" type="button" onClick={() => onClear(scope)}>
+            {ja.cowork.clear}
+          </button>
+        </span>
+      ))}
+    </span>
   )
 }

@@ -330,12 +330,17 @@ body {
 
 /* ダイアログ */
 dialog.dialog {
+  /* Tailwind の初期化で margin が 0 になるため、中央に置き直す */
+  margin: auto;
   background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0;
   width: min(36rem, calc(100vw - 2rem));
+}
+.dialog-foot .btn {
+  white-space: nowrap;
 }
 dialog.dialog::backdrop {
   background: rgb(0 0 0 / 0.45);
@@ -353,6 +358,7 @@ dialog.dialog::backdrop {
 }
 .dialog-foot {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.75rem 1.1rem;
@@ -739,4 +745,145 @@ dialog.dialog.danger .dialog-head {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Cowork（COW-05: ツール実行はターミナル風のブロックで表示する） */
+.tool-log {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  margin: 0.35rem 0 0.5rem;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.78rem;
+}
+.tool-log summary {
+  cursor: pointer;
+  padding: 0.3rem 0.6rem;
+  color: var(--muted);
+}
+.tool-log ol {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.6rem 0.4rem;
+}
+.tool-line {
+  display: grid;
+  grid-template-columns: 9rem 1fr auto;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  border-top: 1px dashed var(--border);
+}
+.tool-name {
+  color: var(--accent-text);
+}
+.tool-target {
+  word-break: break-all;
+}
+.tool-method {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tool-line.running .tool-method {
+  color: var(--accent-text);
+}
+.tool-line.denied .tool-name,
+.tool-line.failed .tool-name,
+.tool-line.denied .tool-method {
+  color: var(--danger);
+}
+.tool-result {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+.target-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+.target-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.25rem 0.4rem;
+  word-break: break-all;
+}
+.command-preview,
+.detail-preview,
+.diff {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.6rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 16rem;
+  overflow: auto;
+}
+.diff {
+  max-height: 60vh;
+  white-space: pre;
+}
+.diff-add {
+  background: color-mix(in srgb, var(--hl-string) 18%, transparent);
+}
+.diff-remove {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+.changes {
+  flex-basis: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+.changes ul {
+  list-style: none;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+.change-kind {
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0 0.3rem;
+}
+.change-trashed {
+  border-color: var(--danger);
+}
+.log-actions {
+  flex-wrap: wrap;
+}
+.todo-panel {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+.todo-panel ul {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+.todo-panel li {
+  display: flex;
+  gap: 0.4rem;
+}
+.todo-completed {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.todo-in_progress {
+  font-weight: 700;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }

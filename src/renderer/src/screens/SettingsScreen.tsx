@@ -27,6 +27,7 @@ export function SettingsScreen({
       <ModelSection configured={status.configured} />
       <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
       <ChatPrefsSection />
+      <CoworkPrefsSection />
     </main>
   )
 }
@@ -137,6 +138,82 @@ function ChatPrefsSection(): React.JSX.Element {
           </label>
         ))}
       </div>
+      <Message message={message} />
+    </section>
+  )
+}
+
+/**
+ * Cowork のコマンドの拒否リスト・許可リスト（SEC-22、SEC-23: ユーザーが追加・編集できる）
+ */
+function CoworkPrefsSection(): React.JSX.Element {
+  const denyId = useId()
+  const allowId = useId()
+  const [deny, setDeny] = useState('')
+  const [allow, setAllow] = useState('')
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.cowork.getPrefs())
+      .then((p) => {
+        if (!active) return
+        setDeny(p.denyPatterns.join('\n'))
+        setAllow(p.allowCommands.join('\n'))
+      })
+      .catch((e: unknown) => active && setMessage({ tone: 'error', text: (e as Error).message }))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const lines = (text: string): string[] =>
+    text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+
+  const save = async (): Promise<void> => {
+    try {
+      const p = await unwrap(
+        window.lumina.cowork.setPrefs({ denyPatterns: lines(deny), allowCommands: lines(allow) })
+      )
+      setDeny(p.denyPatterns.join('\n'))
+      setAllow(p.allowCommands.join('\n'))
+      setMessage({ tone: 'info', text: ja.cowork.prefsSaved })
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="settings-cowork">
+      <h2 id="settings-cowork">{ja.cowork.prefsSection}</h2>
+      <p className="hint">{ja.cowork.commandLimit}</p>
+      <div className="field">
+        <label htmlFor={denyId}>{ja.cowork.denyPatterns}</label>
+        <textarea
+          id={denyId}
+          className="input textarea mono"
+          value={deny}
+          spellCheck={false}
+          onChange={(e) => setDeny(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor={allowId}>{ja.cowork.allowCommands}</label>
+        <textarea
+          id={allowId}
+          className="input textarea mono"
+          value={allow}
+          spellCheck={false}
+          placeholder={'git status\nnpm test*'}
+          onChange={(e) => setAllow(e.target.value)}
+        />
+      </div>
+      <button className="btn btn-primary" type="button" onClick={() => void save()}>
+        {ja.common.save}
+      </button>
       <Message message={message} />
     </section>
   )
