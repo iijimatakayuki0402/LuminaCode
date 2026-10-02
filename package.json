@@ -1,6 +1,6 @@
 {
   "name": "lumina-code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Lumina Code - Claude API 専用の個人用ローカルチャットアプリ",
   "main": "./out/main/index.js",
