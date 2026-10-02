@@ -18,6 +18,7 @@ import type {
   ChatEvent,
   EditAndResendInput,
   Message,
+  WebSource,
   Project,
   SendMessageInput,
   SendResult,
@@ -48,10 +49,16 @@ export const MAX_RETRIES = 3
 const RETRYABLE = new Set(['rate_limit', 'overloaded', 'server', 'timeout'])
 const MAX_WAIT_MS = 60_000
 const DEFAULT_MAX_TOKENS = 64_000
+/** CHT-11: 1 回の応答で行う Web 検索の上限と、pause_turn で続きを頼む回数の上限 */
+const WEB_SEARCH_MAX_USES = 5
+const MAX_CONTINUATIONS = 5
+const SERVER_TOOL_BLOCKS = new Set(['server_tool_use', 'web_search_tool_result'])
 const TITLE_LENGTH = 40
 
 export interface ChatServiceDeps {
   db: Database.Database
+  /** CHT-11: プロジェクトで Web 検索をオンにしているか */
+  isWebSearchEnabled?: (projectId: string) => boolean
   attachments: AttachmentStore
   modelService: ModelService
   getApiKey: () => string | null
@@ -343,7 +350,8 @@ export class ChatService {
   private buildMessages(
     threadId: string,
     assistantId: string,
-    thinking: boolean
+    thinking: boolean,
+    webSearch: boolean
   ): Anthropic.Beta.BetaMessageParam[] {
     const path = this.path(threadId).filter((m) => m.id !== assistantId)
     const attachments = new Map<string, ops.AttachmentRecord[]>()
@@ -361,6 +369,11 @@ export class ChatService {
         messages.push({ role: 'user', content: blocks })
       } else if (m.status === 'complete' && m.content_blocks) {
         const blocks = JSON.parse(m.content_blocks) as Anthropic.Beta.BetaContentBlockParam[]
+        // CHT-11: Web 検索をオフにした後は、検索を含む回答を本文だけにして送る（ツールの定義が無いため）
+        if (!webSearch && blocks.some((b) => SERVER_TOOL_BLOCKS.has(b.type))) {
+          messages.push({ role: 'assistant', content: [{ type: 'text', text: m.content }] })
+          continue
+        }
         messages.push({
           role: 'assistant',
           // CHT-07: 思考をオフにした場合は、以前の思考ブロックを送り返さない
@@ -393,6 +406,13 @@ export class ChatService {
     const wantsOff = supportsThinking && thread?.extended_thinking === false
     const offModes = wantsOff ? offCandidates(this.deps.db, model, effort) : []
     let mode: ThinkingMode = !supportsThinking ? 'none' : (offModes[0] ?? 'on')
+    // CHT-11: Web 検索（プロジェクトでオンにした場合のみ。新しいモデルは結果の絞り込みに対応した版を使う）
+    const webSearch = this.deps.isWebSearchEnabled?.(project.id) ?? false
+    const webTool: Anthropic.Beta.BetaToolUnion = supportsThinking
+      ? { type: 'web_search_20260209', name: 'web_search', max_uses: WEB_SEARCH_MAX_USES }
+      : { type: 'web_search_20250305', name: 'web_search', max_uses: WEB_SEARCH_MAX_USES }
+    // pause_turn（サーバー側のツール実行が途中で区切られた）で続きを頼むときの、それまでの応答
+    let paused: Anthropic.Beta.BetaContentBlock[] = []
     // PRJ-08: グローバル → プロジェクトの順に結合する。CTX-02 の要約も加える
     const system = combineInstructions(
       this.deps.getGlobalInstructions?.() ?? '',
@@ -403,7 +423,18 @@ export class ChatService {
       model,
       max_tokens: Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS),
       // 思考を止める場合は、以前の思考ブロックを送り返さない
-      messages: this.buildMessages(threadId, assistantId, mode === 'on'),
+      messages: [
+        ...this.buildMessages(threadId, assistantId, mode === 'on', webSearch),
+        ...(paused.length > 0
+          ? [
+              {
+                role: 'assistant' as const,
+                content: paused as Anthropic.Beta.BetaContentBlockParam[]
+              }
+            ]
+          : [])
+      ],
+      ...(webSearch ? { tools: [webTool] } : {}),
       stream: true,
       // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
       cache_control: { type: 'ephemeral' },
@@ -421,12 +452,24 @@ export class ChatService {
     let text = ''
     let thinking = ''
     let pending = { text: '', thinking: '' }
-    const usage: TokenUsage = {
+    const zero = (): TokenUsage => ({
       input_tokens: 0,
       output_tokens: 0,
       cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0
-    }
+      cache_read_input_tokens: 0,
+      web_search_requests: 0
+    })
+    const usage = zero()
+    // pause_turn で続けた場合は、前の応答までの使用量を足す
+    const carried = zero()
+    const total = (): TokenUsage => ({
+      input_tokens: carried.input_tokens + usage.input_tokens,
+      output_tokens: carried.output_tokens + usage.output_tokens,
+      cache_creation_input_tokens:
+        carried.cache_creation_input_tokens + usage.cache_creation_input_tokens,
+      cache_read_input_tokens: carried.cache_read_input_tokens + usage.cache_read_input_tokens,
+      web_search_requests: (carried.web_search_requests ?? 0) + (usage.web_search_requests ?? 0)
+    })
     const flush = (): void => {
       if (pending.text) emit({ type: 'text', threadId, messageId: assistantId, text: pending.text })
       if (pending.thinking) {
@@ -436,17 +479,35 @@ export class ChatService {
     }
     const timer = setInterval(flush, this.deps.flushIntervalMs ?? 50)
 
+    let continuations = 0
     try {
       for (let attempt = 0; ; attempt++) {
         try {
           const stream = client.beta.messages.stream(params, { signal })
+          let searchInput: string | null = null
           for await (const event of stream) {
             if (event.type === 'message_start') {
               Object.assign(usage, pickUsage(event.message.usage))
             } else if (event.type === 'message_delta') {
               Object.assign(usage, pickUsage(event.usage))
+            } else if (
+              event.type === 'content_block_start' &&
+              event.content_block.type === 'server_tool_use'
+            ) {
+              searchInput = ''
+            } else if (event.type === 'content_block_stop' && searchInput !== null) {
+              // CHT-11: 検索している語を画面に出す
+              emit({
+                type: 'webSearch',
+                threadId,
+                messageId: assistantId,
+                query: queryOf(searchInput)
+              })
+              searchInput = null
             } else if (event.type === 'content_block_delta') {
-              if (event.delta.type === 'text_delta') {
+              if (event.delta.type === 'input_json_delta' && searchInput !== null) {
+                searchInput += event.delta.partial_json
+              } else if (event.delta.type === 'text_delta') {
                 text += event.delta.text
                 pending.text += event.delta.text
               } else if (event.delta.type === 'thinking_delta') {
@@ -461,7 +522,18 @@ export class ChatService {
           if (mode === 'disabled' || mode === 'between_tools') {
             rememberOffMode(this.deps.db, model, mode)
           }
-          const finalText = final.content
+          // CHT-11: サーバー側の検索が区切られたら、それまでの応答を付けて続きを頼む（回数に上限を設ける）
+          if (final.stop_reason === 'pause_turn' && continuations < MAX_CONTINUATIONS) {
+            continuations++
+            paused = [...paused, ...final.content]
+            Object.assign(carried, total())
+            Object.assign(usage, zero())
+            params = buildParams()
+            attempt = -1
+            continue
+          }
+          const content = [...paused, ...final.content]
+          const finalText = content
             .filter((b) => b.type === 'text')
             .map((b) => (b as { text: string }).text)
             .join('')
@@ -469,10 +541,10 @@ export class ChatService {
             assistantId,
             'complete',
             finalText,
-            JSON.stringify(final.content),
+            JSON.stringify(content),
             null,
             final.stop_reason,
-            { project, threadId, model, usage }
+            { project, threadId, model, usage: total() }
           )
         } catch (error) {
           flush()
@@ -481,7 +553,7 @@ export class ChatService {
               project,
               threadId,
               model,
-              usage
+              usage: total()
             })
           }
           const nothingYet = text === '' && thinking === ''
@@ -523,7 +595,7 @@ export class ChatService {
             project,
             threadId,
             model,
-            usage
+            usage: total()
           })
         }
       }
@@ -613,7 +685,8 @@ export class ChatService {
     const info = this.deps.modelService.getModelInfo(model)
     // 要約は質を優先し、対応するモデルでは常に思考をオンにする（スレッドの設定にかかわらない）
     const thinking = info?.supports_adaptive_thinking ?? false
-    const messages = this.buildMessages(threadId, '', thinking)
+    // 要約にはツールを渡さないため、検索を含む回答は本文だけにする
+    const messages = this.buildMessages(threadId, '', thinking, false)
     messages.push({
       role: 'user',
       content: [
@@ -717,7 +790,12 @@ export class ChatService {
     void _blocks
     void _resume
     void _total
-    return { ...rest, thinking: thinkingOf(record), attachments: attachments.map(toInfo) }
+    return {
+      ...rest,
+      thinking: thinkingOf(record),
+      sources: sourcesOf(record),
+      attachments: attachments.map(toInfo)
+    }
   }
 }
 
@@ -735,5 +813,39 @@ function pickUsage(
     const value = u[key]
     if (typeof value === 'number') result[key] = value
   }
+  const searches = (u as { server_tool_use?: { web_search_requests?: number | null } | null })
+    .server_tool_use?.web_search_requests
+  if (typeof searches === 'number') result.web_search_requests = searches
   return result
+}
+
+/** server_tool_use の入力（JSON）から検索語を取り出す */
+function queryOf(input: string): string {
+  try {
+    const query = (JSON.parse(input) as { query?: unknown }).query
+    return typeof query === 'string' ? query : ''
+  } catch {
+    return ''
+  }
+}
+
+/** 回答の引用元（CHT-11）。web_search_result_location の引用を URL ごとにまとめる */
+function sourcesOf(record: ops.MessageRecord): WebSource[] {
+  if (!record.content_blocks) return []
+  const seen = new Map<string, WebSource>()
+  try {
+    for (const block of JSON.parse(record.content_blocks) as {
+      type: string
+      citations?: { type: string; url?: string; title?: string | null }[] | null
+    }[]) {
+      for (const c of block.citations ?? []) {
+        if (c.type === 'web_search_result_location' && c.url && !seen.has(c.url)) {
+          seen.set(c.url, { url: c.url, title: c.title ?? null })
+        }
+      }
+    }
+  } catch {
+    return []
+  }
+  return [...seen.values()]
 }

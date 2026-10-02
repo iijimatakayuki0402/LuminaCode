@@ -19,6 +19,7 @@ import { parseWindowState, restoreBounds, WINDOW_STATE_KEY } from './windowState
 import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
 import { runDailyBackup } from './data/backup'
+import { getCoworkSettings } from './cowork/extensions'
 import { UsageService } from './usage/usageService'
 import { UpdateService } from './update/updateService'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
@@ -261,6 +262,8 @@ function setupBackend(): boolean {
     usage,
     titles,
     getGlobalInstructions: globalInstructions,
+    // CHT-11: Web 検索の設定は Cowork の Web の設定と同じ（プロジェクトごと）
+    isWebSearchEnabled: (projectId) => getCoworkSettings(db, projectId).webAccess,
     attachments,
     modelService,
     getApiKey: () => apiKeyStore.get(),

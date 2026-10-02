@@ -132,6 +132,9 @@ export const ja = {
     modelSource: { thread: 'スレッド', project: 'プロジェクト', default: '全体の既定' },
     noModel: '未選択（設定画面でモデル一覧を更新してください）',
     threadModel: 'このスレッドのモデル',
+    webSearch: 'Web 検索',
+    webSearchNote:
+      'オンにすると、Claude が必要に応じて Web を検索して答えます（このプロジェクトのすべてのスレッド）。検索 1 回あたり約 0.01 USD がトークンとは別にかかります。質問の内容が検索サービスに送られます。',
     thinking: '拡張思考',
     thinkingNote:
       'オンにすると、回答の前に考える過程（要約）を表示します。オフにすると速く安くなりますが、複雑な質問では回答の質が下がることがあります。思考を止められないモデルでは、オフにしてもオンのまま送信します（思考量を下げると費用を抑えられます）。',
@@ -174,6 +177,9 @@ export const ja = {
     },
     refusal: 'この依頼への回答は控えられました。',
     maxTokens: '出力の上限に達したため、途中で終わっています。',
+    webSearching: (query: string) => `Web を検索しています: ${query}`,
+    webSearchUnknown: '（検索語を取得中）',
+    sources: (n: number) => `出典（${n} 件）`,
     retrying: (attempt: number, max: number, seconds: number) =>
       `再試行を待っています（${attempt}/${max} 回目、約 ${seconds} 秒後）`,
     offline: 'オフラインです。接続が回復すると送信できます。',

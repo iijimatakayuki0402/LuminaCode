@@ -121,6 +121,28 @@ export function ProjectScreen({
     }
   }
 
+  // CHT-11: 通常チャットの Web 検索（Cowork は右パネルで設定する）
+  const [webAccess, setWebAccess] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (project.type !== 'chat') return
+    let active = true
+    unwrap(window.lumina.cowork.getSettings(project.id))
+      .then((s) => active && setWebAccess(s.webAccess))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [project.id, project.type])
+  const changeWebAccess = async (on: boolean): Promise<void> => {
+    try {
+      setWebAccess(
+        (await unwrap(window.lumina.cowork.setSettings(project.id, { webAccess: on }))).webAccess
+      )
+    } catch (e) {
+      fail(e)
+    }
+  }
+
   const changeThinking = async (thread: Thread, on: boolean): Promise<void> => {
     try {
       await unwrap(window.lumina.threads.update(thread.id, { extended_thinking: on }))
@@ -408,6 +430,17 @@ export function ProjectScreen({
                       onChange={(e) => void changeThinking(selected, e.target.checked)}
                     />
                     {ja.project.thinking}
+                  </label>
+                )}
+                {/* CHT-11: Web 検索（通常チャット。プロジェクトごと、既定はオフ） */}
+                {project.type === 'chat' && webAccess !== null && (
+                  <label className="check" title={ja.project.webSearchNote}>
+                    <input
+                      type="checkbox"
+                      checked={webAccess}
+                      onChange={(e) => void changeWebAccess(e.target.checked)}
+                    />
+                    {ja.project.webSearch}
                   </label>
                 )}
                 {/* CHT-07: 思考量（モデルが対応している段階だけを選べる） */}

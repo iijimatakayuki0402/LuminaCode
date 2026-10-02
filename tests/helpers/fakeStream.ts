@@ -11,6 +11,8 @@ export type StreamBehavior =
       thinking?: string
       stopReason?: string
       usage?: { input_tokens: number; output_tokens: number }
+      /** Web 検索（CHT-11）: 本文の前に検索ブロックを返す。citations は本文に付ける引用 */
+      search?: { query: string; citations?: { url: string; title: string }[]; requests?: number }
     }
   | { error: unknown }
   /** 差分を送った後、停止されるまで待つ */
@@ -48,6 +50,15 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
       const thinking = 'thinking' in behavior ? behavior.thinking : undefined
       if (thinking)
         yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking } }
+      const search = 'search' in behavior ? behavior.search : undefined
+      if (search) {
+        yield { type: 'content_block_start', content_block: { type: 'server_tool_use' } }
+        yield {
+          type: 'content_block_delta',
+          delta: { type: 'input_json_delta', partial_json: JSON.stringify({ query: search.query }) }
+        }
+        yield { type: 'content_block_stop' }
+      }
       for (const text of behavior.chunks) {
         yield { type: 'content_block_delta', delta: { type: 'text_delta', text } }
       }
@@ -65,14 +76,32 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
       final = {
         content: [
           ...(thinking ? [{ type: 'thinking', thinking, signature: 'sig-abc' }] : []),
-          { type: 'text', text, citations: null }
+          ...(search
+            ? [
+                {
+                  type: 'server_tool_use',
+                  id: 'srvtoolu_1',
+                  name: 'web_search',
+                  input: { query: search.query }
+                },
+                { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_1', content: [] }
+              ]
+            : []),
+          {
+            type: 'text',
+            text,
+            citations: search?.citations
+              ? search.citations.map((c) => ({ type: 'web_search_result_location', ...c }))
+              : null
+          }
         ],
         stop_reason: behavior.stopReason ?? 'end_turn',
         usage: {
           input_tokens: usage.input_tokens,
           output_tokens: usage.output_tokens,
           cache_creation_input_tokens: 0,
-          cache_read_input_tokens: 0
+          cache_read_input_tokens: 0,
+          ...(search ? { server_tool_use: { web_search_requests: search.requests ?? 1 } } : {})
         }
       }
     }

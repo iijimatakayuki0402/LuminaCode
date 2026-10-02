@@ -101,7 +101,14 @@ export interface Message {
   error_kind: ApiErrorKind | null
   /** 思考の要約（折りたたみ表示用。CHT-07） */
   thinking: string | null
+  /** Web 検索の出典（CHT-11。回答の引用元。重複は除く） */
+  sources: WebSource[]
   attachments: AttachmentInfo[]
+}
+
+export interface WebSource {
+  url: string
+  title: string | null
 }
 
 export interface Setting {
@@ -220,6 +227,8 @@ export type ChatEvent =
   | { type: 'permission'; threadId: string; request: PermissionRequest }
   /** Cowork: todo の更新（COW-13） */
   | { type: 'todos'; threadId: string; messageId: string; todos: TodoItem[] }
+  /** 通常チャット: Web を検索している（CHT-11） */
+  | { type: 'webSearch'; threadId: string; messageId: string; query: string }
   /** スレッドのタイトルなどが更新された（THR-03 の自動生成） */
   | { type: 'threadUpdated'; threadId: string }
 

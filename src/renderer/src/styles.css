@@ -1283,3 +1283,17 @@ kbd {
   background: var(--surface);
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
 }
+
+/* Web 検索の出典（CHT-11） */
+.sources {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+}
+.sources ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+.sources a {
+  color: var(--accent-text);
+  word-break: break-all;
+}

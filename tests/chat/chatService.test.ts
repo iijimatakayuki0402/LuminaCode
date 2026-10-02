@@ -13,6 +13,7 @@ import * as ops from '../../src/main/db/operations'
 import { ModelService } from '../../src/main/models/modelService'
 import { apiError } from '../helpers/fakeAnthropic'
 import { offCandidates } from '../../src/main/chat/thinking'
+import { estimateCost } from '../../src/main/chat/pricing'
 
 /** 思考の指定がモデルに受け付けられなかったときの 400 */
 const thinkingError = (): InstanceType<typeof Anthropic.APIError> =>
@@ -43,6 +44,7 @@ let attachments: AttachmentStore
 let service: ChatService
 let projectId: string
 let threadId: string
+let webSearch: boolean
 
 function setup(behaviors: StreamBehavior[]): void {
   fake = fakeChatClient(behaviors)
@@ -54,6 +56,7 @@ beforeEach(() => {
   events = []
   sleeps = []
   apiKey = 'sk-test'
+  webSearch = false
   setup([{ chunks: ['こんにちは', '！'] }])
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -92,6 +95,7 @@ beforeEach(() => {
     attachments,
     modelService: new ModelService(db, () => null),
     getApiKey: () => apiKey,
+    isWebSearchEnabled: () => webSearch,
     createClient: () => fake.client,
     emit: (e) => events.push(e),
     sleep: async (ms) => {
@@ -676,5 +680,88 @@ describe('思考量・共通の指示・要約・タイトル（Phase 2）', () 
     expect(generate).toHaveBeenCalledTimes(1)
     expect(generate).toHaveBeenCalledWith(threadId, '旅行の計画', 'A1', ADAPTIVE)
     expect(ops.getThread(db, threadId)!.title_source).toBe('auto')
+  })
+})
+
+describe('Web 検索（CHT-11）', () => {
+  it('オンのときだけ検索ツールを渡し、モデルに合った版を使う', async () => {
+    setup([{ chunks: ['a'] }, { chunks: ['b'] }, { chunks: ['c'] }])
+    await sendAndWait('Q1')
+    expect(fake.calls[0]).not.toHaveProperty('tools')
+
+    webSearch = true
+    await sendAndWait('Q2')
+    expect(fake.calls[1].tools).toEqual([
+      { type: 'web_search_20260209', name: 'web_search', max_uses: 5 }
+    ])
+    ops.updateThread(db, threadId, { model: LEGACY })
+    await sendAndWait('Q3')
+    expect(fake.calls[2].tools).toEqual([
+      { type: 'web_search_20250305', name: 'web_search', max_uses: 5 }
+    ])
+  })
+
+  it('検索語を知らせ、出典を回答に付け、検索の料金を概算コストに含める', async () => {
+    webSearch = true
+    setup([
+      {
+        chunks: ['東京は晴れです。'],
+        search: {
+          query: '東京 天気',
+          requests: 2,
+          citations: [
+            { url: 'https://example.com/a', title: 'A' },
+            { url: 'https://example.com/a', title: 'A' },
+            { url: 'https://example.com/b', title: 'B' }
+          ]
+        }
+      }
+    ])
+    const m = await sendAndWait('天気は？')
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'webSearch', query: '東京 天気' })
+    )
+    expect(m.sources).toEqual([
+      { url: 'https://example.com/a', title: 'A' },
+      { url: 'https://example.com/b', title: 'B' }
+    ])
+    // 検索の回数は概算コストに含める（1 回 0.01 USD）
+    const base = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0
+    }
+    expect(estimateCost('claude-sonnet-5-5', { ...base, web_search_requests: 2 })).toBeCloseTo(
+      0.02,
+      6
+    )
+  })
+
+  it('pause_turn では、それまでの応答を付けて続きを頼み、1 つの回答にまとめる', async () => {
+    webSearch = true
+    setup([
+      { chunks: ['前半'], stopReason: 'pause_turn', search: { query: 'q' } },
+      { chunks: ['後半'] }
+    ])
+    const m = await sendAndWait('Q')
+    expect(fake.calls).toHaveLength(2)
+    const last = fake.calls[1].messages.at(-1)!
+    expect(last.role).toBe('assistant')
+    expect((last.content as { type: string }[]).map((b) => b.type)).toContain('server_tool_use')
+    expect(m.content).toBe('前半後半')
+    expect(m.status).toBe('complete')
+    // 使用量は 2 回分を足す
+    expect(m.tokens_used).toBe(240)
+  })
+
+  it('オフにした後は、検索を含む以前の回答を本文だけにして送る', async () => {
+    webSearch = true
+    setup([{ chunks: ['A1'], search: { query: 'q' } }, { chunks: ['A2'] }])
+    await sendAndWait('Q1')
+    webSearch = false
+    await sendAndWait('Q2')
+    const assistant = fake.calls[1].messages.find((x) => x.role === 'assistant')!
+    expect(assistant.content).toEqual([{ type: 'text', text: 'A1' }])
   })
 })

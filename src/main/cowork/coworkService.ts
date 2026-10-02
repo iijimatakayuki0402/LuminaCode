@@ -492,7 +492,7 @@ export class CoworkService {
     void _blocks
     void _resume
     void _total
-    return { ...rest, thinking: null, attachments: [] }
+    return { ...rest, thinking: null, sources: [], attachments: [] }
   }
 
   private start(

@@ -28,6 +28,8 @@ interface Live {
   text: string
   thinking: string
   retry: string | null
+  /** CHT-11: 検索している語（本文が届いたら消す） */
+  searching?: string | null
 }
 
 /** 会話の一覧に並べる行（10.1: 仮想スクロールで、画面に見えている行だけを描画する） */
@@ -178,17 +180,19 @@ export function ChatView({
         const current = map[event.messageId] ?? { text: '', thinking: '', retry: null }
         const next =
           event.type === 'text'
-            ? { ...current, text: current.text + event.text, retry: null }
+            ? { ...current, text: current.text + event.text, retry: null, searching: null }
             : event.type === 'thinking'
               ? { ...current, thinking: current.thinking + event.text, retry: null }
-              : {
-                  ...current,
-                  retry: ja.chat.retrying(
-                    event.attempt,
-                    event.maxAttempts,
-                    Math.round(event.waitMs / 1000)
-                  )
-                }
+              : event.type === 'webSearch'
+                ? { ...current, searching: event.query || ja.chat.webSearchUnknown }
+                : {
+                    ...current,
+                    retry: ja.chat.retrying(
+                      event.attempt,
+                      event.maxAttempts,
+                      Math.round(event.waitMs / 1000)
+                    )
+                  }
         return { ...map, [event.messageId]: next }
       })
     })
@@ -775,6 +779,26 @@ function AssistantRow({
         {streaming && <span className="cursor" aria-hidden="true" />}
       </div>
       {live?.retry && <p className="message message-info">{live.retry}</p>}
+      {streaming && live?.searching && (
+        <p className="hint">{ja.chat.webSearching(live.searching)}</p>
+      )}
+      {/* CHT-11: Web 検索の出典 */}
+      {!streaming && message.sources.length > 0 && (
+        <details className="sources">
+          <summary>{ja.chat.sources(message.sources.length)}</summary>
+          <ul>
+            {message.sources
+              .filter((s) => /^https?:\/\//i.test(s.url))
+              .map((s) => (
+                <li key={s.url}>
+                  <a href={s.url} target="_blank" rel="noreferrer" title={s.url}>
+                    {s.title || s.url}
+                  </a>
+                </li>
+              ))}
+          </ul>
+        </details>
+      )}
       {message.status === 'stopped' && <p className="hint">{ja.chat.status.stopped}</p>}
       {message.status === 'interrupted' && <p className="hint">{ja.chat.status.interrupted}</p>}
       {message.status === 'error' && <p className="hint">{ja.chat.status.error}</p>}

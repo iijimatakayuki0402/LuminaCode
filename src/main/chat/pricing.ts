@@ -29,7 +29,12 @@ export interface TokenUsage {
   output_tokens: number
   cache_creation_input_tokens: number
   cache_read_input_tokens: number
+  /** Web 検索の回数（CHT-11。トークンとは別に課金される） */
+  web_search_requests?: number
 }
+
+/** Web 検索 1 回の料金（USD。1,000 回あたり 10 ドル。2026-09-25 時点） */
+export const WEB_SEARCH_USD = 0.01
 
 /** 最も長く一致する単価を返す（例: claude-opus-5-5 は claude-opus-5 より優先） */
 export function findPrice(
@@ -57,6 +62,7 @@ export function estimateCost(
       usage.output_tokens * price.output +
       usage.cache_creation_input_tokens * price.cacheWrite +
       usage.cache_read_input_tokens * price.cacheRead) /
-    1_000_000
+      1_000_000 +
+    (usage.web_search_requests ?? 0) * WEB_SEARCH_USD
   )
 }
