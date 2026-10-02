@@ -408,6 +408,25 @@ export type McpServerSummary =
 export interface CoworkProjectSettings {
   /** Web 検索・Web 取得を使えるようにする（6.6: 既定はオフ） */
   webAccess: boolean
+  /** 実行前に Git のスナップショットを記録する（COW-10: 既定はオフ） */
+  gitSnapshots: boolean
+}
+
+/** Git のスナップショット（COW-10） */
+export interface GitSnapshot {
+  ref: string
+  commit: string
+  created_at: number
+  message: string
+}
+
+export interface GitStatus {
+  /** git コマンドが使えるか */
+  available: boolean
+  /** 作業フォルダが Git リポジトリの最上位か */
+  repo: boolean
+  enabled: boolean
+  snapshots: GitSnapshot[]
 }
 
 export interface CoworkPrefs {

@@ -68,6 +68,7 @@ import {
   listToolEventsByThread,
   summarizeToolResponse
 } from './toolEvents'
+import type { GitSnapshots } from './gitSnapshot'
 import { TASK_TOOLS, TaskTracker } from './tasks'
 import { moveToTrash, sizeOf } from './trash'
 
@@ -141,6 +142,8 @@ const loadAgentSdk = (): Promise<AgentSdk> => import('@anthropic-ai/claude-agent
 
 export interface CoworkServiceDeps {
   db: Database.Database
+  /** COW-10: Git のスナップショット */
+  git?: Pick<GitSnapshots, 'snapshot'>
   snapshotsDir: string
   modelService: ModelService
   getApiKey: () => string | null
@@ -620,7 +623,17 @@ export class CoworkService {
     const signal = run.controller.signal
     const recorded = new Set<string>()
     const { query, tool, createSdkMcpServer } = await this.loadSdk()
-    const webAccess = getCoworkSettings(db, project.id).webAccess
+    const settings = getCoworkSettings(db, project.id)
+    const webAccess = settings.webAccess
+    // COW-10: 実行前に Git のスナップショットを記録する（失敗しても実行は続ける）
+    if (settings.gitSnapshots && this.deps.git) {
+      try {
+        const title = ops.getThread(db, threadId)?.title ?? '無題のスレッド'
+        await this.deps.git.snapshot(workRoot, `Cowork の実行前: ${title}`)
+      } catch (error) {
+        console.warn('[cowork] git snapshot failed:', (error as Error).message)
+      }
+    }
     let skillPlugin: string | null = null
     if (this.deps.pluginsRoot) {
       try {

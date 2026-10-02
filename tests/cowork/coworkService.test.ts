@@ -32,11 +32,19 @@ let projectId: string
 let threadId: string
 /** 確認ダイアログに自動で返す回答 */
 let answer: PermissionResponse
+/** COW-10: 記録したスナップショット（作業フォルダ・メッセージ） */
+let gitCalls: string[][]
 
 function setup(scripts: Script[]): void {
   fake = fakeAgentSdk(scripts)
   service = new CoworkService({
     db,
+    git: {
+      snapshot: async (root, message) => {
+        gitCalls.push([root, message])
+        return 'refs/lumina/snapshots/x'
+      }
+    },
     snapshotsDir: join(base, 'snapshots'),
     modelService: new ModelService(db, () => null),
     getApiKey: () => 'sk-test',
@@ -59,6 +67,7 @@ beforeEach(() => {
   writeFileSync(join(base, 'outside.txt'), 'secret')
   events = []
   answer = 'once'
+  gitCalls = []
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   ops.setSetting(db, 'default_model', 'claude-sonnet-test')
   const project = ops.createProject(db, { type: 'cowork', name: 'C', work_folder: work })
@@ -183,6 +192,15 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
         { content: '直す', status: 'in_progress', activeForm: '直す' }
       ]
     })
+  })
+
+  it('設定でオンにした場合だけ、実行前に Git のスナップショットを記録する（COW-10）', async () => {
+    await send()
+    expect(gitCalls).toEqual([])
+    setCoworkSettings(db, projectId, { gitSnapshots: true })
+    ops.updateThread(db, threadId, { title: '整理' })
+    await send()
+    expect(gitCalls).toEqual([[work, 'Cowork の実行前: 整理']])
   })
 
   it('完了した内容と使用量を記録する', async () => {

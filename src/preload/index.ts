@@ -109,6 +109,9 @@ const api: LuminaApi = {
   cowork: {
     respond: invoke('cowork:respond'),
     toolEvents: invoke('cowork:toolEvents'),
+    gitStatus: invoke('cowork:gitStatus'),
+    gitDiff: invoke('cowork:gitDiff'),
+    gitRestore: invoke('cowork:gitRestore'),
     changes: invoke('cowork:changes'),
     undo: invoke('cowork:undo'),
     diff: invoke('cowork:diff'),

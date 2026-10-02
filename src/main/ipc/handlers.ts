@@ -43,6 +43,7 @@ import {
   skillsStatus
 } from '../cowork/extensions'
 import type { McpStore } from '../cowork/mcpStore'
+import type { GitSnapshots } from '../cowork/gitSnapshot'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
 import { clearAppLog } from '../logging/appLog'
 import type { AttachmentInfo, LicenseList, StageResult } from '@shared/types'
@@ -70,6 +71,8 @@ export interface HandlerDeps {
   selectFiles: () => Promise<string[]>
   chatService: ChatService
   coworkService: CoworkService
+  /** COW-10: Git のスナップショット */
+  git?: GitSnapshots
   usage: UsageService
   mcp: McpStore
   attachments: AttachmentStore
@@ -127,6 +130,7 @@ export function createHandlers({
   selectFiles,
   chatService,
   coworkService,
+  git,
   usage,
   mcp,
   attachments,
@@ -310,6 +314,30 @@ export function createHandlers({
     'cowork:changes': (messageId) => coworkService.listChanges(v.id(messageId, 'messageId')),
     'cowork:undo': (messageId) => coworkService.undo(v.id(messageId, 'messageId')),
     'cowork:diff': (snapshotId) => coworkService.diff(v.id(snapshotId, 'snapshotId')),
+    'cowork:gitStatus': async (projectId) => {
+      const id = v.id(projectId, 'projectId')
+      const root = workFolderOf(id)
+      const enabled = getCoworkSettings(db, id).gitSnapshots
+      if (!git) return { available: false, repo: false, enabled, snapshots: [] }
+      return { ...(await git.status(root)), enabled }
+    },
+    'cowork:gitDiff': (projectId, ref) => {
+      if (!git) throw new ops.ValidationError('Git 連携は使えません。')
+      return git.diff(workFolderOf(v.id(projectId, 'projectId')), v.str(ref, 'ref'))
+    },
+    'cowork:gitRestore': async (projectId, ref) => {
+      if (!git) throw new ops.ValidationError('Git 連携は使えません。')
+      const id = v.id(projectId, 'projectId')
+      const root = workFolderOf(id)
+      // 実行中の作業とぶつからないよう、このプロジェクトで実行中なら戻さない
+      if (coworkService.activeThreadIds().some((t) => ops.getThread(db, t)?.project_id === id)) {
+        throw new ops.ValidationError(
+          'Cowork の実行中は戻せません。停止してからやり直してください。'
+        )
+      }
+      const { trashed } = await git.restore(root, v.str(ref, 'ref'))
+      return { trashed }
+    },
     'cowork:trashList': (projectId) => listTrash(workFolderOf(v.id(projectId, 'projectId'))),
     'cowork:trashRestore': (projectId, entryId) =>
       restoreFromTrash(workFolderOf(v.id(projectId, 'projectId')), v.str(entryId, 'entryId')),

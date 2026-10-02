@@ -236,8 +236,11 @@ describe('Web・MCP の判定（6.6）', () => {
   })
 
   it('プロジェクトごとの Web の設定', () => {
-    expect(getCoworkSettings(db, projectId)).toEqual({ webAccess: false })
-    expect(setCoworkSettings(db, projectId, { webAccess: true })).toEqual({ webAccess: true })
+    expect(getCoworkSettings(db, projectId)).toEqual({ webAccess: false, gitSnapshots: false })
+    expect(setCoworkSettings(db, projectId, { webAccess: true })).toEqual({
+      webAccess: true,
+      gitSnapshots: false
+    })
   })
 })
 

@@ -51,6 +51,7 @@ import type {
   UpdateProjectInput,
   UpdateThreadInput,
   FullBackupPreview,
+  GitStatus,
   ProjectTemplate,
   Snippet,
   SnippetInput
@@ -147,6 +148,11 @@ export interface IpcContract {
   /** Cowork: 確認ダイアログへの回答 */
   'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
   'cowork:toolEvents': { args: [threadId: string]; result: ToolEventInfo[] }
+  /** Git のスナップショット（COW-10） */
+  'cowork:gitStatus': { args: [projectId: string]; result: GitStatus }
+  'cowork:gitDiff': { args: [projectId: string, ref: string]; result: string }
+  /** スナップショットの状態に戻す（戻す前の状態も記録する。増えたファイルは .lumina-trash へ） */
+  'cowork:gitRestore': { args: [projectId: string, ref: string]; result: { trashed: number } }
   /** Cowork: 実行（応答メッセージ）単位の変更の一覧と一括 Undo（SEC-15） */
   'cowork:changes': { args: [messageId: string]; result: FileChange[] }
   'cowork:undo': { args: [messageId: string]; result: UndoResult }
@@ -349,6 +355,9 @@ export interface LuminaApi {
   cowork: {
     respond: Invoke<'cowork:respond'>
     toolEvents: Invoke<'cowork:toolEvents'>
+    gitStatus: Invoke<'cowork:gitStatus'>
+    gitDiff: Invoke<'cowork:gitDiff'>
+    gitRestore: Invoke<'cowork:gitRestore'>
     changes: Invoke<'cowork:changes'>
     undo: Invoke<'cowork:undo'>
     diff: Invoke<'cowork:diff'>

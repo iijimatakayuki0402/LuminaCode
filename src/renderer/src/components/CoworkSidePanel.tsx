@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type {
   CoworkProjectSettings,
+  GitSnapshot,
+  GitStatus,
   FileEntry,
   FilePreview,
   McpServer,
@@ -237,6 +239,8 @@ function Extensions({ projectId }: { projectId: string }): React.JSX.Element {
         </label>
         <p className="hint">{ja.panel.webNote}</p>
       </section>
+
+      <GitSection projectId={projectId} />
 
       <section>
         <h3 className="panel-heading">{ja.panel.skills}</h3>
@@ -509,5 +513,148 @@ function McpDialog({
         />
       )}
     </>
+  )
+}
+
+// ========================================
+// Git のスナップショット（COW-10）
+// ========================================
+
+function GitSection({ projectId }: { projectId: string }): React.JSX.Element | null {
+  const [status, setStatus] = useState<GitStatus | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [diff, setDiff] = useState<{ snapshot: GitSnapshot; text: string } | null>(null)
+  const [restoring, setRestoring] = useState<GitSnapshot | null>(null)
+
+  const reload = useCallback(async (): Promise<void> => {
+    try {
+      setStatus(await unwrap(window.lumina.cowork.gitStatus(projectId)))
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.cowork.gitStatus(projectId))
+      .then((s) => active && setStatus(s))
+      .catch((e: unknown) => active && setMessage((e as Error).message))
+    // 実行が終わったら一覧を読み直す（実行前のスナップショットが増える）
+    const off = window.lumina.chat.onEvent((event) => {
+      if (event.type === 'finished') void reload()
+    })
+    return () => {
+      active = false
+      off()
+    }
+  }, [projectId, reload])
+
+  if (!status) return null
+
+  const toggle = async (on: boolean): Promise<void> => {
+    setMessage(null)
+    try {
+      await unwrap(window.lumina.cowork.setSettings(projectId, { gitSnapshots: on }))
+      await reload()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
+  const showDiff = async (snapshot: GitSnapshot): Promise<void> => {
+    setMessage(null)
+    try {
+      const text = await unwrap(window.lumina.cowork.gitDiff(projectId, snapshot.ref))
+      setDiff({ snapshot, text })
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
+  const restore = async (snapshot: GitSnapshot): Promise<void> => {
+    setRestoring(null)
+    setMessage(null)
+    try {
+      const { trashed } = await unwrap(window.lumina.cowork.gitRestore(projectId, snapshot.ref))
+      setMessage(ja.git.restored(trashed))
+      await reload()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="panel-heading">{ja.git.title}</h3>
+      {!status.available ? (
+        <p className="hint">{ja.git.unavailable}</p>
+      ) : !status.repo ? (
+        <p className="hint">{ja.git.notRepo}</p>
+      ) : (
+        <>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={status.enabled}
+              onChange={(e) => void toggle(e.target.checked)}
+            />
+            {ja.git.toggle}
+          </label>
+          <p className="hint">{ja.git.note}</p>
+          {status.snapshots.length === 0 ? (
+            <p className="hint">{ja.git.none}</p>
+          ) : (
+            <ul className="plain-list">
+              {status.snapshots.slice(0, 10).map((s) => (
+                <li key={s.ref}>
+                  <span className="hint" title={s.message}>
+                    {new Date(s.created_at).toLocaleString('ja-JP')} {s.message}
+                  </span>
+                  <span className="row">
+                    <button className="btn btn-sm" type="button" onClick={() => void showDiff(s)}>
+                      {ja.git.diff}
+                    </button>
+                    <button
+                      className="btn btn-sm btn-danger"
+                      type="button"
+                      onClick={() => setRestoring(s)}
+                    >
+                      {ja.git.restore}
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {message && <p className="hint">{message}</p>}
+      {diff && (
+        <Dialog
+          title={ja.git.diffTitle}
+          onClose={() => setDiff(null)}
+          footer={
+            <button className="btn" type="button" onClick={() => setDiff(null)} autoFocus>
+              {ja.common.back}
+            </button>
+          }
+        >
+          <p className="hint">
+            {new Date(diff.snapshot.created_at).toLocaleString('ja-JP')} {diff.snapshot.message}
+          </p>
+          <pre className="file-preview">{diff.text.trim() || ja.git.noDiff}</pre>
+        </Dialog>
+      )}
+      {restoring && (
+        <ConfirmDialog
+          title={ja.git.restoreTitle}
+          message={ja.git.restoreConfirm(new Date(restoring.created_at).toLocaleString('ja-JP'))}
+          confirmLabel={ja.git.restore}
+          danger
+          onConfirm={() => void restore(restoring)}
+          onCancel={() => setRestoring(null)}
+        />
+      )}
+    </section>
   )
 }

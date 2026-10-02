@@ -187,8 +187,13 @@ export function buildSkillPlugin(
 
 const WEB_KEY = (projectId: string): string => `cowork.web.${projectId}`
 
+const GIT_KEY = (projectId: string): string => `cowork.gitSnapshots.${projectId}`
+
 export function getCoworkSettings(db: Database.Database, projectId: string): CoworkProjectSettings {
-  return { webAccess: getSetting(db, WEB_KEY(projectId)) === '1' }
+  return {
+    webAccess: getSetting(db, WEB_KEY(projectId)) === '1',
+    gitSnapshots: getSetting(db, GIT_KEY(projectId)) === '1'
+  }
 }
 
 export function setCoworkSettings(
@@ -199,6 +204,10 @@ export function setCoworkSettings(
   if (input.webAccess !== undefined) {
     if (input.webAccess) setSetting(db, WEB_KEY(projectId), '1')
     else deleteSetting(db, WEB_KEY(projectId))
+  }
+  if (input.gitSnapshots !== undefined) {
+    if (input.gitSnapshots) setSetting(db, GIT_KEY(projectId), '1')
+    else deleteSetting(db, GIT_KEY(projectId))
   }
   return getCoworkSettings(db, projectId)
 }

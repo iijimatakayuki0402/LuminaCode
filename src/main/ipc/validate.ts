@@ -229,7 +229,8 @@ export const mcpServer: Check<McpServer> = (value, name) => {
 }
 
 export const coworkSettingsInput = object<Partial<CoworkProjectSettings>>({
-  webAccess: optional(bool)
+  webAccess: optional(bool),
+  gitSnapshots: optional(bool)
 })
 
 export const updateThreadInput = object<UpdateThreadInput>({

@@ -21,6 +21,7 @@ import { installAppLog } from './logging/appLog'
 import { runDailyBackup } from './data/backup'
 import { applyPendingRestore } from './data/fullBackup'
 import { getCoworkSettings } from './cowork/extensions'
+import { GitSnapshots } from './cowork/gitSnapshot'
 import { UsageService } from './usage/usageService'
 import { UpdateService } from './update/updateService'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
@@ -284,7 +285,9 @@ function setupBackend(): boolean {
   // モデル一覧が古い・無い場合は、起動時に裏で更新する（既定モデルの設定にも必要）
   if (apiKeyStore.get() !== null) void modelService.list().catch(() => undefined)
 
+  const git = new GitSnapshots()
   coworkService = new CoworkService({
+    git,
     db,
     usage,
     mcp,
@@ -325,6 +328,7 @@ function setupBackend(): boolean {
       modelService,
       chatService,
       coworkService,
+      git,
       usage,
       mcp,
       attachments,
