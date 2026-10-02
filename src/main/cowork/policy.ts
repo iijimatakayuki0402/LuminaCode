@@ -18,6 +18,8 @@ export interface Classified {
   command?: string
   /** 作業フォルダの外を指すパス（SEC-01〜03） */
   outside: string[]
+  /** 読み取り専用のフォルダへの書き込み・削除（COW-12） */
+  readOnly?: boolean
   /** 専用の確認が必要な理由（SEC-04: .git、.lumina-trash） */
   danger?: string
   /** 判定の対象外（未知のツール）なら理由 */
@@ -65,16 +67,28 @@ export function classifyTool(
   toolName: string,
   input: unknown,
   workRoot: string,
-  /** 読み取りだけを許すフォルダ（信頼済みのスキルのコピー）。書き込み・削除には使わない */
-  readRoots: string[] = []
+  /** 読み取りだけを許すフォルダ（信頼済みのスキルのコピー、読み取り専用の追加フォルダ）。書き込み・削除には使わない */
+  readRoots: string[] = [],
+  /** 作業フォルダのほかに書き込み・削除できるフォルダ（読み書きの追加フォルダ。COW-12） */
+  writeRoots: string[] = []
 ): Classified {
   const args = (input ?? {}) as Record<string, unknown>
   const check = (category: ToolCategory, rawPaths: (string | undefined)[]): Classified => {
     const paths = rawPaths.filter((p): p is string => !!p).map((p) => resolve(workRoot, p))
-    const roots = category === 'read' ? [workRoot, ...readRoots] : [workRoot]
+    const writable = [workRoot, ...writeRoots]
+    const roots = category === 'read' ? [...writable, ...readRoots] : writable
     const outside = paths.filter((p) => !roots.some((root) => isInsideWorkFolder(root, p)))
+    const readOnly =
+      category !== 'read' &&
+      outside.some((p) => readRoots.some((root) => isInsideWorkFolder(root, p)))
     const danger = paths.map((p) => protectedReason(workRoot, p)).find(Boolean)
-    return { category, paths, outside, ...(danger ? { danger } : {}) }
+    return {
+      category,
+      paths,
+      outside,
+      ...(readOnly ? { readOnly } : {}),
+      ...(danger ? { danger } : {})
+    }
   }
 
   if (READ_TOOLS.has(toolName)) {
@@ -218,7 +232,7 @@ export interface DecideContext {
   includesFolder?: boolean
   /** Web 検索・Web 取得を使えるか（6.6: 既定はオフ） */
   webAccess?: boolean
-  /** 信頼済みのスキルのコピー（コマンドでのパスの指定を認める） */
+  /** コマンドでのパスの指定を認めるフォルダ（信頼済みのスキルのコピー、読み書きの追加フォルダ） */
   extraRoots?: string[]
 }
 
@@ -228,6 +242,12 @@ export function decide(c: Classified, ctx: DecideContext): Decision {
     return {
       action: 'deny',
       reason: 'Web へのアクセスは無効です（プロジェクトの設定でオンにできます）。'
+    }
+  }
+  if (c.readOnly) {
+    return {
+      action: 'deny',
+      reason: `読み取り専用のフォルダには書き込み・削除できません: ${c.outside[0]}`
     }
   }
   if (c.outside.length > 0) {

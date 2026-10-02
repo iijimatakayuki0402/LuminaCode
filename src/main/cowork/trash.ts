@@ -125,6 +125,7 @@ export function listTrash(workRoot: string): TrashEntry[] {
       if (!existsSync(join(trash, stamp, item.path))) continue
       entries.push({
         id: join(stamp, item.path),
+        root: resolve(workRoot),
         originalPath: item.path,
         deletedAt: manifest.deletedAt,
         isFolder: item.isFolder,

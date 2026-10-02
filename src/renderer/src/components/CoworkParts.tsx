@@ -355,10 +355,11 @@ export function TrashDialog({
   const reload = async (): Promise<void> => {
     setEntries(await unwrap(window.lumina.cowork.trashList(projectId)))
   }
+  const multipleRoots = new Set((entries ?? []).map((e) => e.root)).size > 1
 
   const restore = async (entry: TrashEntry): Promise<void> => {
     try {
-      const path = await unwrap(window.lumina.cowork.trashRestore(projectId, entry.id))
+      const path = await unwrap(window.lumina.cowork.trashRestore(projectId, entry.id, entry.root))
       setMessage(ja.trash.restored(path))
       await reload()
     } catch (e) {
@@ -401,9 +402,10 @@ export function TrashDialog({
           <table className="target-table">
             <tbody>
               {entries.map((e) => (
-                <tr key={e.id}>
+                <tr key={`${e.root}|${e.id}`}>
                   <td className="mono">
-                    {e.originalPath}
+                    {/* COW-12: 追加のフォルダの退避は、フォルダのパスを付けて示す */}
+                    {multipleRoots ? `${e.root}\\${e.originalPath}` : e.originalPath}
                     {e.isFolder ? '\\' : ''}
                   </td>
                   <td className="mono">{formatSize(e.size_bytes)}</td>

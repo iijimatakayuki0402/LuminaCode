@@ -306,6 +306,8 @@ export interface FileChange {
 export interface TrashEntry {
   /** .lumina-trash からの相対パス（<日時>\<元の相対パス>） */
   id: string
+  /** 退避先のあるフォルダ（作業フォルダ、または読み書きの追加フォルダ。COW-12） */
+  root: string
   originalPath: string
   deletedAt: number
   isFolder: boolean
@@ -410,6 +412,15 @@ export interface CoworkProjectSettings {
   webAccess: boolean
   /** 実行前に Git のスナップショットを記録する（COW-10: 既定はオフ） */
   gitSnapshots: boolean
+}
+
+/** 追加の作業フォルダ（COW-12） */
+export type CoworkFolderAccess = 'read' | 'write'
+
+export interface CoworkFolder {
+  /** 実体パス（絶対パス） */
+  path: string
+  access: CoworkFolderAccess
 }
 
 /** Git のスナップショット（COW-10） */

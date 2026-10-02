@@ -1297,3 +1297,18 @@ kbd {
   color: var(--accent-text);
   word-break: break-all;
 }
+
+/* 追加の作業フォルダ（COW-12） */
+.folder-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.select-sm {
+  width: auto;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.8rem;
+}

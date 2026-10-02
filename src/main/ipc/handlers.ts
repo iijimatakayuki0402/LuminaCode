@@ -44,6 +44,7 @@ import {
 } from '../cowork/extensions'
 import type { McpStore } from '../cowork/mcpStore'
 import type { GitSnapshots } from '../cowork/gitSnapshot'
+import { addFolder, listFolders, removeFolder, rootsOf, setFolderAccess } from '../cowork/folders'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
 import { clearAppLog } from '../logging/appLog'
 import type { AttachmentInfo, LicenseList, StageResult } from '@shared/types'
@@ -155,6 +156,12 @@ export function createHandlers({
     const message = found(ops.getMessage(db, messageId), 'メッセージが見つかりません。')
     return engineForThread(message.thread_id)
   }
+  /** 退避先のあるフォルダ（作業フォルダが先頭） */
+  const trashRoots = (projectId: string): string[] => {
+    const root = workFolderOf(projectId)
+    return [root, ...rootsOf(db, projectId, root).writeRoots]
+  }
+
   const workFolderOf = (projectId: string): string => {
     const project = found(ops.getProject(db, projectId), PROJECT_NOT_FOUND)
     if (project.type !== 'cowork' || !project.work_folder) {
@@ -338,11 +345,49 @@ export function createHandlers({
       const { trashed } = await git.restore(root, v.str(ref, 'ref'))
       return { trashed }
     },
-    'cowork:trashList': (projectId) => listTrash(workFolderOf(v.id(projectId, 'projectId'))),
-    'cowork:trashRestore': (projectId, entryId) =>
-      restoreFromTrash(workFolderOf(v.id(projectId, 'projectId')), v.str(entryId, 'entryId')),
+    // 退避は、作業フォルダと読み書きの追加フォルダ（COW-12）のそれぞれにある
+    'cowork:trashList': (projectId) =>
+      trashRoots(v.id(projectId, 'projectId'))
+        .flatMap((root) => listTrash(root))
+        .sort((a, b) => b.deletedAt - a.deletedAt),
+    'cowork:trashRestore': (projectId, entryId, root) => {
+      const roots = trashRoots(v.id(projectId, 'projectId'))
+      const target = v.optional(v.str)(root, 'root') ?? roots[0]
+      if (!roots.includes(target))
+        throw new ops.ValidationError('退避したファイルが見つかりません。')
+      return restoreFromTrash(target, v.str(entryId, 'entryId'))
+    },
     'cowork:trashPurge': (projectId, days) =>
-      purgeTrash(workFolderOf(v.id(projectId, 'projectId')), v.num(days, 'olderThanDays')),
+      trashRoots(v.id(projectId, 'projectId')).reduce(
+        (n, root) => n + purgeTrash(root, v.num(days, 'olderThanDays')),
+        0
+      ),
+    'cowork:folders': (projectId) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return listFolders(db, id)
+    },
+    'cowork:addFolder': (projectId, path, access) => {
+      const id = v.id(projectId, 'projectId')
+      return addFolder(
+        db,
+        id,
+        workFolderOf(id),
+        v.str(path, 'path'),
+        v.folderAccess(access, 'access'),
+        workFolderPolicy
+      )
+    },
+    'cowork:setFolderAccess': (projectId, path, access) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return setFolderAccess(db, id, v.str(path, 'path'), v.folderAccess(access, 'access'))
+    },
+    'cowork:removeFolder': (projectId, path) => {
+      const id = v.id(projectId, 'projectId')
+      workFolderOf(id)
+      return removeFolder(db, id, v.str(path, 'path'))
+    },
     'cowork:getAlways': (projectId, threadId) =>
       coworkService.getAlways(
         v.id(projectId, 'projectId'),

@@ -227,3 +227,47 @@ describe('対象外のツール', () => {
     })
   })
 })
+
+describe('追加のフォルダ（COW-12）', () => {
+  const judge = (tool: string, input: unknown, readRoots: string[], writeRoots: string[]) =>
+    decide(
+      classifyTool(tool, input, work, readRoots, writeRoots),
+      ctx('auto_edit', { extraRoots: writeRoots })
+    )
+
+  it('読み取りはすべての追加フォルダで、書き込みは読み書きのフォルダだけで許す', () => {
+    const ro = join(base, 'outside')
+    const rw = join(base, 'rw')
+    mkdirSync(rw, { recursive: true })
+    expect(judge('Read', { file_path: join(ro, 'x.txt') }, [ro], [rw])).toEqual({
+      action: 'allow',
+      method: 'auto'
+    })
+    expect(judge('Write', { file_path: join(rw, 'x.txt') }, [ro], [rw])).toEqual({
+      action: 'allow',
+      method: 'auto'
+    })
+    expect(judge('Write', { file_path: join(ro, 'x.txt') }, [ro], [rw])).toMatchObject({
+      action: 'deny',
+      reason: expect.stringContaining('読み取り専用')
+    })
+    expect(judge(DELETE_TOOL, { paths: [join(ro, 'x.txt')] }, [ro], [rw])).toMatchObject({
+      action: 'deny',
+      reason: expect.stringContaining('読み取り専用')
+    })
+    // どちらにも入っていないフォルダは、これまでどおり拒否する
+    expect(judge('Read', { file_path: join(base, 'other', 'x') }, [ro], [rw])).toMatchObject({
+      action: 'deny',
+      reason: expect.stringContaining('作業フォルダの外')
+    })
+  })
+
+  it('コマンドでパスを指定できるのは読み書きのフォルダだけ', () => {
+    const ro = join(base, 'outside')
+    const rw = join(base, 'rw')
+    expect(checkCommand(`type ${join(rw, 'a.txt')}`, work, rules, [rw])).toEqual({ verdict: 'ask' })
+    expect(checkCommand(`type ${join(ro, 'a.txt')}`, work, rules, [rw])).toMatchObject({
+      verdict: 'deny'
+    })
+  })
+})

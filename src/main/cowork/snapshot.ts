@@ -9,9 +9,11 @@ import type Database from 'better-sqlite3'
 import { app } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { FileChange } from '@shared/types'
-import { moveToTrash, restoreTrashedPath } from './trash'
+import { moveToTrash, restoreTrashedPath, TRASH_DIR } from './trash'
+import { displayPath, rootFor } from './folders'
+import { isInsideWorkFolder } from '../security/pathGuard'
 
 export interface Snapshot {
   id: string
@@ -185,7 +187,7 @@ export function listChanges(
 ): FileChange[] {
   return firstPerFile(listByMessage(db, messageId)).map((r) => ({
     snapshotId: r.id,
-    path: relative(workRoot, r.file_path),
+    path: displayPath(workRoot, r.file_path),
     kind: r.kind,
     restored: r.restored_at !== null
   }))
@@ -204,22 +206,30 @@ export function undoRun(
   db: Database.Database,
   snapshotsDir: string,
   workRoot: string,
-  messageId: string
+  messageId: string,
+  /** 読み書きの追加フォルダ（COW-12。退避はそれぞれのフォルダの .lumina-trash に行う） */
+  writeRoots: string[] = []
 ): UndoResult {
+  const roots = [workRoot, ...writeRoots]
   const records = firstPerFile(listByMessage(db, messageId).filter((r) => r.restored_at === null))
   const result: UndoResult = { restored: [], skipped: [] }
   // 後から行った変更から順に戻す
   for (const r of [...records].reverse()) {
-    const path = relative(workRoot, r.file_path)
+    const path = displayPath(workRoot, r.file_path)
     try {
       if (r.kind === 'modified') {
         const content = readSnapshotContent(snapshotsDir, r)
         mkdirSync(dirname(r.file_path), { recursive: true })
         writeFileSync(r.file_path, content)
       } else if (r.kind === 'created') {
-        if (existsSync(r.file_path)) moveToTrash(workRoot, [r.file_path])
+        if (existsSync(r.file_path)) {
+          moveToTrash(rootFor(roots, r.file_path) ?? workRoot, [r.file_path])
+        }
       } else if (r.trash_path) {
-        restoreTrashedPath(workRoot, r.trash_path)
+        const trashPath = r.trash_path
+        const root =
+          roots.find((root) => isInsideWorkFolder(join(root, TRASH_DIR), trashPath)) ?? workRoot
+        restoreTrashedPath(root, trashPath)
       }
       result.restored.push(path)
     } catch (error) {
@@ -263,7 +273,7 @@ export function snapshotDiff(
         : null
   const after = existsSync(r.file_path) ? readText(() => readFileSync(r.file_path)) : ''
   return {
-    path: relative(workRoot, r.file_path),
+    path: displayPath(workRoot, r.file_path),
     before,
     after,
     binary: before === null || after === null

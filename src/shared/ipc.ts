@@ -50,6 +50,8 @@ import type {
   UsageTotals,
   UpdateProjectInput,
   UpdateThreadInput,
+  CoworkFolder,
+  CoworkFolderAccess,
   FullBackupPreview,
   GitStatus,
   ProjectTemplate,
@@ -148,6 +150,17 @@ export interface IpcContract {
   /** Cowork: 確認ダイアログへの回答 */
   'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
   'cowork:toolEvents': { args: [threadId: string]; result: ToolEventInfo[] }
+  /** 追加の作業フォルダ（COW-12）。変更は更新後の一覧を返す */
+  'cowork:folders': { args: [projectId: string]; result: CoworkFolder[] }
+  'cowork:addFolder': {
+    args: [projectId: string, path: string, access: CoworkFolderAccess]
+    result: CoworkFolder[]
+  }
+  'cowork:setFolderAccess': {
+    args: [projectId: string, path: string, access: CoworkFolderAccess]
+    result: CoworkFolder[]
+  }
+  'cowork:removeFolder': { args: [projectId: string, path: string]; result: CoworkFolder[] }
   /** Git のスナップショット（COW-10） */
   'cowork:gitStatus': { args: [projectId: string]; result: GitStatus }
   'cowork:gitDiff': { args: [projectId: string, ref: string]; result: string }
@@ -159,7 +172,10 @@ export interface IpcContract {
   'cowork:diff': { args: [snapshotId: string]; result: FileDiff | null }
   /** Cowork: 退避先（SEC-11） */
   'cowork:trashList': { args: [projectId: string]; result: TrashEntry[] }
-  'cowork:trashRestore': { args: [projectId: string, entryId: string]; result: string }
+  'cowork:trashRestore': {
+    args: [projectId: string, entryId: string, root?: string]
+    result: string
+  }
   'cowork:trashPurge': { args: [projectId: string, olderThanDays: number]; result: number }
   /** Cowork: 常に許可（6.7: 設定画面から解除できる） */
   'cowork:getAlways': { args: [projectId: string, threadId?: string]; result: AlwaysAllowRules }
@@ -355,6 +371,10 @@ export interface LuminaApi {
   cowork: {
     respond: Invoke<'cowork:respond'>
     toolEvents: Invoke<'cowork:toolEvents'>
+    folders: Invoke<'cowork:folders'>
+    addFolder: Invoke<'cowork:addFolder'>
+    setFolderAccess: Invoke<'cowork:setFolderAccess'>
+    removeFolder: Invoke<'cowork:removeFolder'>
     gitStatus: Invoke<'cowork:gitStatus'>
     gitDiff: Invoke<'cowork:gitDiff'>
     gitRestore: Invoke<'cowork:gitRestore'>

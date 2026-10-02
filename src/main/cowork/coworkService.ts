@@ -16,7 +16,7 @@ import type {
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, resolve } from 'node:path'
 import { z } from 'zod'
 import { activePath } from '@shared/conversation'
 import { resolveModel } from '@shared/models'
@@ -69,6 +69,7 @@ import {
   summarizeToolResponse
 } from './toolEvents'
 import type { GitSnapshots } from './gitSnapshot'
+import { displayPath, rootFor, rootsOf, type FolderRoots } from './folders'
 import { TASK_TOOLS, TaskTracker } from './tasks'
 import { moveToTrash, sizeOf } from './trash'
 
@@ -379,7 +380,8 @@ export class CoworkService {
     if (this.running.has(threadId)) {
       throw new ValidationError('実行中は元に戻せません。先に停止してください。')
     }
-    return undoRun(this.deps.db, this.deps.snapshotsDir, workRoot, messageId)
+    const { writeRoots } = rootsOf(this.deps.db, this.projectIdOfThread(threadId), workRoot)
+    return undoRun(this.deps.db, this.deps.snapshotsDir, workRoot, messageId, writeRoots)
   }
 
   diff(snapshotId: string): ReturnType<typeof snapshotDiff> {
@@ -436,6 +438,10 @@ export class CoworkService {
       .prepare('SELECT agent_session_id FROM threads WHERE id = ?')
       .get(threadId) as { agent_session_id: string | null }
     return { ...thread, agent_session_id: row.agent_session_id }
+  }
+
+  private projectIdOfThread(threadId: string): string {
+    return ops.getThread(this.deps.db, threadId)!.project_id
   }
 
   private contextOfMessage(messageId: string): { threadId: string; workRoot: string } {
@@ -554,11 +560,19 @@ export class CoworkService {
     return this.toPublic(assistant)
   }
 
-  private systemAppend(project: Project, workRoot: string): string {
+  private systemAppend(project: Project, workRoot: string, roots: FolderRoots): string {
     const parts = [
       'あなたは Lumina Code の Cowork として、作業フォルダ内のファイルを操作します。',
       `作業フォルダ: ${workRoot}`,
-      '作業フォルダの外のファイルにはアクセスできません。',
+      ...(roots.writeRoots.length > 0
+        ? [`読み書きできる追加のフォルダ: ${roots.writeRoots.join('、')}`]
+        : []),
+      ...(roots.readRoots.length > 0
+        ? [
+            `読み取り専用の追加のフォルダ（参照のみ。書き込み・削除はできません）: ${roots.readRoots.join('、')}`
+          ]
+        : []),
+      '上記以外のフォルダのファイルにはアクセスできません。追加のフォルダは絶対パスで指定してください。',
       `ファイルやフォルダを削除するときは、コマンド（rm、del、Remove-Item など）ではなく、必ず ${DELETE_TOOL} ツールを使ってください。削除したものは作業フォルダの .lumina-trash に退避されます。`,
       'ツールの実行が拒否された場合は、理由に従い、別の方法を無理に試さずにユーザーへ報告してください。'
     ]
@@ -625,6 +639,8 @@ export class CoworkService {
     const { query, tool, createSdkMcpServer } = await this.loadSdk()
     const settings = getCoworkSettings(db, project.id)
     const webAccess = settings.webAccess
+    // COW-12: 追加のフォルダ（読み書き・読み取り専用）
+    const roots = rootsOf(db, project.id, workRoot)
     // COW-10: 実行前に Git のスナップショットを記録する（失敗しても実行は続ける）
     if (settings.gitSnapshots && this.deps.git) {
       try {
@@ -652,10 +668,17 @@ export class CoworkService {
     // 削除ツール（SEC-10）。実行前に PreToolUse フックで確認済み
     const deleteTool = tool(
       'delete_files',
-      '作業フォルダ内のファイル・フォルダを削除します（.lumina-trash に退避し、あとで復元できます）。パスは作業フォルダからの相対パスで指定します。',
+      '作業フォルダ内のファイル・フォルダを削除します（.lumina-trash に退避し、あとで復元できます）。パスは作業フォルダからの相対パスで指定します（読み書きできる追加のフォルダは絶対パスで指定します）。',
       { paths: z.array(z.string()).min(1).max(100) },
       async ({ paths }) => {
-        const moved = moveToTrash(workRoot, paths)
+        // COW-12: フォルダごとに、それぞれの .lumina-trash に退避する
+        const groups = new Map<string, string[]>()
+        for (const p of paths) {
+          const absolute = resolve(workRoot, p)
+          const root = rootFor([workRoot, ...roots.writeRoots], absolute) ?? workRoot
+          groups.set(root, [...(groups.get(root) ?? []), absolute])
+        }
+        const moved = [...groups].flatMap(([root, list]) => moveToTrash(root, list))
         for (const m of moved) {
           recordChange(db, {
             threadId,
@@ -669,7 +692,7 @@ export class CoworkService {
           content: [
             {
               type: 'text' as const,
-              text: `${moved.length} 件を .lumina-trash に退避しました: ${moved.map((m) => relative(workRoot, m.originalPath)).join(', ')}`
+              text: `${moved.length} 件を .lumina-trash に退避しました: ${moved.map((m) => displayPath(workRoot, m.originalPath)).join(', ')}`
             }
           ]
         }
@@ -693,7 +716,8 @@ export class CoworkService {
         recorded,
         input.agent_id ?? null,
         webAccess,
-        skillPlugin
+        skillPlugin,
+        roots
       )
       return {
         hookSpecificOutput: {
@@ -726,6 +750,10 @@ export class CoworkService {
 
     const options: Options = {
       cwd: workRoot,
+      // COW-12: 追加のフォルダ（読み書き・読み取り専用の区別はフックで判定する）
+      ...(roots.writeRoots.length + roots.readRoots.length > 0
+        ? { additionalDirectories: [...roots.writeRoots, ...roots.readRoots] }
+        : {}),
       model,
       env: this.buildEnv(apiKey),
       abortController: run.controller,
@@ -759,7 +787,7 @@ export class CoworkService {
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: this.systemAppend(project, workRoot)
+        append: this.systemAppend(project, workRoot, roots)
       },
       ...(this.deps.executablePath ? { pathToClaudeCodeExecutable: this.deps.executablePath } : {}),
       ...(budget !== null ? { maxBudgetUsd: budget } : {}),
@@ -900,12 +928,13 @@ export class CoworkService {
     recorded: Set<string>,
     agentId: string | null = null,
     webAccess = false,
-    skillPlugin: string | null = null
+    skillPlugin: string | null = null,
+    roots: FolderRoots = { workRoot, writeRoots: [], readRoots: [] }
   ): Promise<{ allow: boolean; reason?: string }> {
     const { db, emit } = this.deps
-    // 信頼済みのスキルのコピーは読み取りのみ許す（スキルに付属するファイルの参照のため）
-    const readRoots = skillPlugin ? [skillPlugin] : []
-    const classified = classifyTool(toolName, toolInput, workRoot, readRoots)
+    // 信頼済みのスキルのコピーと、読み取り専用の追加フォルダ（COW-12）は読み取りのみ許す
+    const readRoots = [...(skillPlugin ? [skillPlugin] : []), ...roots.readRoots]
+    const classified = classifyTool(toolName, toolInput, workRoot, readRoots, roots.writeRoots)
     const includesFolder = classified.paths.some((p) => existsSync(p) && statSync(p).isDirectory())
     const current = ops.getProject(db, project.id) ?? project
     const decision = decide(classified, {
@@ -915,11 +944,12 @@ export class CoworkService {
       workRoot,
       includesFolder,
       webAccess,
-      extraRoots: readRoots
+      // コマンドでパスを指定できるのは、スキルのコピーと読み書きの追加フォルダ
+      extraRoots: [...(skillPlugin ? [skillPlugin] : []), ...roots.writeRoots]
     })
 
     const target =
-      classified.paths.map((p) => relative(workRoot, p) || '.').join(', ') ||
+      classified.paths.map((p) => displayPath(workRoot, p)).join(', ') ||
       (typeof (toolInput as { pattern?: unknown })?.pattern === 'string'
         ? String((toolInput as { pattern: string }).pattern)
         : null)
@@ -1005,7 +1035,7 @@ export class CoworkService {
   }
 
   private describeTarget(workRoot: string, path: string): PermissionTarget {
-    const rel = relative(workRoot, path) || '.'
+    const rel = displayPath(workRoot, path)
     if (!existsSync(path)) return { path: rel, kind: 'missing', size_bytes: null }
     const folder = statSync(path).isDirectory()
     let size: number | null = null

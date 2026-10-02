@@ -8,6 +8,7 @@ import { ACCENTS, MODES } from '@shared/theme'
 import { EFFORT_LEVELS, type EffortLevel } from '@shared/types'
 import type {
   Appearance,
+  CoworkFolderAccess,
   ChatPrefs,
   CoworkPrefs,
   CoworkProjectSettings,
@@ -245,3 +246,5 @@ export const snippetInput = object<SnippetInput>({
   name: str,
   content: str
 })
+
+export const folderAccess = oneOf<CoworkFolderAccess>(['read', 'write'])

@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -17,6 +18,7 @@ import { CoworkService } from '../../src/main/cowork/coworkService'
 import { DELETE_TOOL } from '../../src/main/cowork/policy'
 import { listTrash } from '../../src/main/cowork/trash'
 import { setCoworkSettings, setSkillsTrust } from '../../src/main/cowork/extensions'
+import { addFolder } from '../../src/main/cowork/folders'
 import { createInMemoryDatabase } from '../../src/main/db/init'
 import * as ops from '../../src/main/db/operations'
 import { ModelService } from '../../src/main/models/modelService'
@@ -201,6 +203,49 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
     ops.updateThread(db, threadId, { title: '整理' })
     await send()
     expect(gitCalls).toEqual([[work, 'Cowork の実行前: 整理']])
+  })
+
+  it('追加のフォルダ: 読み書きのフォルダは編集・退避でき、読み取り専用は書き込めない（COW-12）', async () => {
+    const rw = join(base, 'rw')
+    const ro = join(base, 'ro')
+    mkdirSync(rw)
+    mkdirSync(ro)
+    writeFileSync(join(rw, 'old.txt'), 'old')
+    const policy = {
+      userDataPath: join(base, 'ud'),
+      homeDir: join(base, 'h', 'u'),
+      systemRoot: 'C:\Windows'
+    }
+    addFolder(db, projectId, work, rw, 'write', policy)
+    addFolder(db, projectId, work, ro, 'read', policy)
+    answer = 'once'
+    setup([
+      {
+        calls: [
+          { tool: 'Write', input: { file_path: join(rw, 'new.txt'), content: 'x' } },
+          { tool: 'Write', input: { file_path: join(ro, 'bad.txt'), content: 'x' } },
+          { tool: DELETE_TOOL, input: { paths: [join(rw, 'old.txt')] } }
+        ],
+        text: 'done'
+      }
+    ])
+    const id = await send()
+    expect(fake.runs[0].options.additionalDirectories).toEqual([rw, ro])
+    expect(decisions()).toEqual([`Write:allow`, 'Write:deny', `${DELETE_TOOL}:allow`])
+    expect(existsSync(join(rw, 'new.txt'))).toBe(true)
+    expect(existsSync(join(ro, 'bad.txt'))).toBe(false)
+    // 削除はそのフォルダの .lumina-trash に退避する
+    expect(existsSync(join(rw, 'old.txt'))).toBe(false)
+    expect(readdirSync(join(rw, '.lumina-trash')).length).toBe(1)
+    const append = (fake.runs[0].options.systemPrompt as { append: string }).append
+    expect(append).toContain(rw)
+    expect(append).toContain('読み取り専用')
+
+    // 元に戻す: 作ったファイルは退避し、削除したファイルは戻す
+    const result = service.undo(id)
+    expect(result.skipped).toEqual([])
+    expect(existsSync(join(rw, 'new.txt'))).toBe(false)
+    expect(readFileSync(join(rw, 'old.txt'), 'utf-8')).toBe('old')
   })
 
   it('完了した内容と使用量を記録する', async () => {

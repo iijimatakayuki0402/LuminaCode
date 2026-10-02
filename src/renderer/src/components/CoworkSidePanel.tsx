@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type {
+  CoworkFolder,
+  CoworkFolderAccess,
   CoworkProjectSettings,
   GitSnapshot,
   GitStatus,
@@ -239,6 +241,8 @@ function Extensions({ projectId }: { projectId: string }): React.JSX.Element {
         </label>
         <p className="hint">{ja.panel.webNote}</p>
       </section>
+
+      <FoldersSection projectId={projectId} />
 
       <GitSection projectId={projectId} />
 
@@ -653,6 +657,112 @@ function GitSection({ projectId }: { projectId: string }): React.JSX.Element | n
           danger
           onConfirm={() => void restore(restoring)}
           onCancel={() => setRestoring(null)}
+        />
+      )}
+    </section>
+  )
+}
+
+// ========================================
+// 追加の作業フォルダ（COW-12）
+// ========================================
+
+function FoldersSection({ projectId }: { projectId: string }): React.JSX.Element {
+  const [folders, setFolders] = useState<CoworkFolder[] | null>(null)
+  const [access, setAccess] = useState<CoworkFolderAccess>('read')
+  const [removing, setRemoving] = useState<CoworkFolder | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.cowork.folders(projectId))
+      .then((list) => active && setFolders(list))
+      .catch((e: unknown) => active && setMessage((e as Error).message))
+    return () => {
+      active = false
+    }
+  }, [projectId])
+
+  const run = async (task: () => Promise<CoworkFolder[]>): Promise<void> => {
+    setMessage(null)
+    try {
+      setFolders(await task())
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
+  const add = async (): Promise<void> => {
+    const picked = await unwrap(window.lumina.dialog.selectFolder()).catch(() => null)
+    if (picked) await run(() => unwrap(window.lumina.cowork.addFolder(projectId, picked, access)))
+  }
+
+  return (
+    <section>
+      <h3 className="panel-heading">{ja.folders.title}</h3>
+      <p className="hint">{ja.folders.note}</p>
+      {folders && folders.length === 0 && <p className="hint">{ja.folders.none}</p>}
+      {folders && folders.length > 0 && (
+        <ul className="plain-list">
+          {folders.map((f) => (
+            <li key={f.path}>
+              <span className="mono folder-path" title={f.path}>
+                {f.path}
+              </span>
+              <span className="row">
+                <select
+                  className="select select-sm"
+                  aria-label={ja.folders.access}
+                  value={f.access}
+                  onChange={(e) =>
+                    void run(() =>
+                      unwrap(
+                        window.lumina.cowork.setFolderAccess(
+                          projectId,
+                          f.path,
+                          e.target.value as CoworkFolderAccess
+                        )
+                      )
+                    )
+                  }
+                >
+                  <option value="read">{ja.folders.read}</option>
+                  <option value="write">{ja.folders.write}</option>
+                </select>
+                <button className="btn btn-sm" type="button" onClick={() => setRemoving(f)}>
+                  {ja.folders.remove}
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="row">
+        <select
+          className="select select-sm"
+          aria-label={ja.folders.access}
+          value={access}
+          onChange={(e) => setAccess(e.target.value as CoworkFolderAccess)}
+        >
+          <option value="read">{ja.folders.read}</option>
+          <option value="write">{ja.folders.write}</option>
+        </select>
+        <button className="btn btn-sm" type="button" onClick={() => void add()}>
+          {ja.folders.add}
+        </button>
+      </div>
+      {message && <p className="hint">{message}</p>}
+      {removing && (
+        <ConfirmDialog
+          title={ja.folders.removeTitle}
+          message={ja.folders.removeConfirm(removing.path)}
+          confirmLabel={ja.folders.remove}
+          onConfirm={() => {
+            const target = removing
+            setRemoving(null)
+            void run(() => unwrap(window.lumina.cowork.removeFolder(projectId, target.path)))
+          }}
+          onCancel={() => setRemoving(null)}
         />
       )}
     </section>
