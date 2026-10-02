@@ -17,10 +17,13 @@ const formatDate = (epoch: number): string =>
  * ダッシュボード（要件 6.1）
  */
 export function DashboardScreen({
+  openCreate = false,
   apiKeyConfigured,
   onOpen,
   onOpenSettings
 }: {
+  /** 新規プロジェクトのダイアログを開いた状態で表示する（CMN-02: Ctrl+Shift+N） */
+  openCreate?: boolean
   apiKeyConfigured: boolean
   onOpen: (project: Project) => void
   onOpenSettings: () => void
@@ -30,7 +33,9 @@ export function DashboardScreen({
   const [typeFilter, setTypeFilter] = useState<ProjectType | 'all'>('all')
   const [sort, setSort] = useState<SortKey>('updated')
   const [showArchived, setShowArchived] = useState(false)
-  const [dialog, setDialog] = useState<ProjectDialogMode | null>(null)
+  const [dialog, setDialog] = useState<ProjectDialogMode | null>(
+    openCreate ? { kind: 'create' } : null
+  )
   const [deleting, setDeleting] = useState<Project | null>(null)
   const [message, setMessage] = useState<MessageState | null>(null)
   const [importing, setImporting] = useState<ImportPreview | null>(null)

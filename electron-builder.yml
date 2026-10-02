@@ -8,6 +8,10 @@ files:
 asarUnpack:
   - node_modules/better-sqlite3/**
   - node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**
+# 6.12: 同梱するオープンソースのライセンス一覧（npm run build で作る）
+extraResources:
+  - from: resources/licenses.json
+    to: licenses.json
 win:
   target:
     - nsis
@@ -15,3 +19,10 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # 10.4: アンインストール時にアプリデータを削除するかを選ぶ（build/installer.nsh）
+  include: build/installer.nsh
+# CMN-03: 更新の配信元。設定すると、ビルド時に resources\app-update.yml が作られ、更新を確認できるようになる
+# （未設定の間は、アプリは更新を確認しない）。設定例:
+# publish:
+#   provider: generic
+#   url: https://example.com/lumina-code/

@@ -1,13 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   CHAT_EVENT_CHANNEL,
+  UPDATE_EVENT_CHANNEL,
   type IpcArgs,
   type IpcChannel,
   type IpcResult,
   type IpcReturn,
   type LuminaApi
 } from '@shared/ipc'
-import type { ChatEvent } from '@shared/types'
+import type { ChatEvent, UpdateStatus } from '@shared/types'
 
 // レンダラーに公開する API は、ここで最小限に定義する（API キーやファイルには直接触れさせない）
 // 汎用の invoke は公開せず、用途ごとの関数だけを渡す
@@ -19,7 +20,20 @@ const invoke =
 
 const api: LuminaApi = {
   app: {
-    getInfo: invoke('app:getInfo')
+    getInfo: invoke('app:getInfo'),
+    licenses: invoke('app:licenses')
+  },
+  update: {
+    getStatus: invoke('update:getStatus'),
+    check: invoke('update:check'),
+    download: invoke('update:download'),
+    install: invoke('update:install'),
+    onStatus: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: UpdateStatus): void =>
+        listener(payload)
+      ipcRenderer.on(UPDATE_EVENT_CHANNEL, handler)
+      return () => ipcRenderer.removeListener(UPDATE_EVENT_CHANNEL, handler)
+    }
   },
   projects: {
     list: invoke('projects:list'),

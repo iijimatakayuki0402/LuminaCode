@@ -14,6 +14,7 @@ import { Message, type MessageState } from '../components/Message'
 import { TypeBadge } from '../components/TypeBadge'
 import { unwrap } from '../lib/ipc'
 import { useModels } from '../lib/useModels'
+import { useShortcuts } from '../lib/useShortcuts'
 import { ChatView } from './ChatView'
 import { TrashDialog } from '../components/CoworkParts'
 import { CoworkSidePanel } from '../components/CoworkSidePanel'
@@ -95,6 +96,9 @@ export function ProjectScreen({
       fail(e)
     }
   }
+
+  // CMN-02: Ctrl+N で新しいスレッドを作る
+  useShortcuts({ newThread: () => void createThread() })
 
   const rename = async (): Promise<void> => {
     if (!renaming) return
@@ -244,7 +248,12 @@ export function ProjectScreen({
                       value={renaming.title}
                       autoFocus
                       onChange={(e) => setRenaming({ id: t.id, title: e.target.value })}
-                      onKeyDown={(e) => e.key === 'Escape' && setRenaming(null)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Escape') return
+                        // 生成の停止（Esc）には使わない
+                        e.preventDefault()
+                        setRenaming(null)
+                      }}
                     />
                     <button className="btn btn-sm" type="submit">
                       {ja.project.renameSave}

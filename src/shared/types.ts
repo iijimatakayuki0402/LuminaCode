@@ -543,3 +543,59 @@ export interface ModelList {
   /** API から取得できず、前回のキャッシュを返している（要件 MDL-02） */
   stale: boolean
 }
+
+// ========================================
+// アプリ情報・更新（要件 6.12、CMN-03、10.4）
+// ========================================
+
+/**
+ * 更新の状態
+ *   unconfigured  配信元が未設定（または開発版）。確認しない
+ *   idle          まだ確認していない
+ *   checking      確認中
+ *   latest        最新版を使っている
+ *   available     新しいバージョンがある（ダウンロードはユーザーの承認後）
+ *   downloading   ダウンロード中
+ *   downloaded    ダウンロード済み（再起動して適用するのはユーザーの承認後）
+ *   error         確認・ダウンロードに失敗した
+ */
+export type UpdateState =
+  | 'unconfigured'
+  | 'idle'
+  | 'checking'
+  | 'latest'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+export interface UpdateStatus {
+  state: UpdateState
+  currentVersion: string
+  /** 新しいバージョン（available・downloading・downloaded のとき） */
+  version: string | null
+  /** 更新内容（配信元が提供している場合。プレーンテキスト） */
+  releaseNotes: string | null
+  /** ダウンロードの進捗（0〜100） */
+  percent: number | null
+  /** 最後に確認した日時（epoch ms） */
+  checkedAt: number | null
+  /** error のときの内容 */
+  error: string | null
+}
+
+/** オープンソースのライセンス表示（6.12） */
+export interface LicenseEntry {
+  name: string
+  version: string
+  /** SPDX 形式のライセンス名（package.json の license） */
+  license: string
+  /** ライセンス文（LICENSE ファイル）。見つからない場合は null */
+  text: string | null
+}
+
+export interface LicenseList {
+  /** アプリ本体（package.json の license。未設定なら null） */
+  appLicense: string | null
+  packages: LicenseEntry[]
+}

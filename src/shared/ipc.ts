@@ -37,6 +37,8 @@ import type {
   SendResult,
   StageResult,
   Thread,
+  LicenseList,
+  UpdateStatus,
   ToolEventFilter,
   ToolEventInfo,
   ToolEventRow,
@@ -54,6 +56,7 @@ export interface AppInfo {
   version: string
   electron: string
   chrome: string
+  node: string
   /** データ保存先（要件 6.12 の設定画面で表示する） */
   dataPath: string
   /** 単価表（USG-05） */
@@ -66,6 +69,15 @@ export interface AppInfo {
 
 export interface IpcContract {
   'app:getInfo': { args: []; result: AppInfo }
+  /** 同梱しているオープンソースのライセンス（6.12） */
+  'app:licenses': { args: []; result: LicenseList }
+
+  /** 更新（CMN-03）。ダウンロード・インストールは、ユーザーの操作でのみ行う */
+  'update:getStatus': { args: []; result: UpdateStatus }
+  'update:check': { args: []; result: UpdateStatus }
+  'update:download': { args: []; result: UpdateStatus }
+  /** アプリを終了して更新をインストールする */
+  'update:install': { args: []; result: void }
 
   'projects:list': { args: [options?: ListProjectsOptions]; result: Project[] }
   'projects:get': { args: [id: string]; result: Project }
@@ -228,6 +240,15 @@ type Invoke<C extends IpcChannel> = (...args: IpcArgs<C>) => Promise<IpcResult<I
 export interface LuminaApi {
   app: {
     getInfo: Invoke<'app:getInfo'>
+    licenses: Invoke<'app:licenses'>
+  }
+  update: {
+    getStatus: Invoke<'update:getStatus'>
+    check: Invoke<'update:check'>
+    download: Invoke<'update:download'>
+    install: Invoke<'update:install'>
+    /** 状態の変化を受け取る。戻り値で解除する */
+    onStatus: (listener: (status: UpdateStatus) => void) => () => void
   }
   projects: {
     list: Invoke<'projects:list'>
@@ -345,3 +366,4 @@ export interface LuminaApi {
 
 /** main → renderer の通知チャンネル */
 export const CHAT_EVENT_CHANNEL = 'chat:event'
+export const UPDATE_EVENT_CHANNEL = 'update:status'

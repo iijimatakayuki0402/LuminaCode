@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { DEFAULT_ACCENT, DEFAULT_MODE } from '@shared/theme'
-import type { ApiKeyStatus, Appearance, Project } from '@shared/types'
+import type { ApiKeyStatus, Appearance, Project, UpdateStatus } from '@shared/types'
 import { applyAppearance } from './lib/appearance'
 import { unwrap } from './lib/ipc'
+import { useShortcuts } from './lib/useShortcuts'
 import { ja } from './locales/ja'
 import { DashboardScreen } from './screens/DashboardScreen'
 import { OperationLogScreen } from './screens/OperationLogScreen'
@@ -14,12 +15,15 @@ import { SetupScreen } from './screens/SetupScreen'
 
 type Screen =
   | { name: 'setup' }
-  | { name: 'dashboard' }
-  | { name: 'settings' }
+  /** createProject: 新規プロジェクトのダイアログを開いた状態で表示する（Ctrl+Shift+N） */
+  | { name: 'dashboard'; createProject?: number }
+  /** section: 表示する位置（更新のお知らせから開いたときはアプリ情報） */
+  | { name: 'settings'; section?: 'about' }
   | { name: 'logs' }
   | { name: 'usage' }
   | { name: 'project'; project: Project; focus?: { threadId: string; messageId: string } }
-  | { name: 'search' }
+  /** focus: Ctrl+K で開き直したときに検索欄へフォーカスを戻す */
+  | { name: 'search'; focus?: number }
 
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<ApiKeyStatus | null>(null)
@@ -29,6 +33,21 @@ export default function App(): React.JSX.Element {
   })
   const [screen, setScreen] = useState<Screen>({ name: 'dashboard' })
   const [error, setError] = useState<string | null>(null)
+  const [update, setUpdate] = useState<UpdateStatus | null>(null)
+
+  // CMN-03: 更新の状態（起動時の確認結果も、ここで受け取って表示する）
+  useEffect(() => {
+    const off = window.lumina.update.onStatus(setUpdate)
+    void window.lumina.update.getStatus().then((r) => r.ok && setUpdate(r.value))
+    return off
+  }, [])
+
+  // CMN-02: 画面をまたぐショートカット（新規スレッドはプロジェクト画面で受け取る）
+  useShortcuts({
+    newProject: () => setScreen({ name: 'dashboard', createProject: Date.now() }),
+    search: () => setScreen({ name: 'search', focus: Date.now() }),
+    settings: () => setScreen({ name: 'settings' })
+  })
 
   useEffect(() => {
     Promise.all([
@@ -79,7 +98,20 @@ export default function App(): React.JSX.Element {
   return (
     <>
       <header className="topbar">
-        <span className="brand">LUMINA CODE</span>
+        <span className="row">
+          <span className="brand">LUMINA CODE</span>
+          {(update?.state === 'available' || update?.state === 'downloaded') && update.version && (
+            <button
+              className="btn btn-sm update-badge"
+              type="button"
+              onClick={() => setScreen({ name: 'settings', section: 'about' })}
+            >
+              {update.state === 'downloaded'
+                ? ja.update.bannerReady(update.version)
+                : ja.update.banner(update.version)}
+            </button>
+          )}
+        </span>
         {/* DSH-02: 設定画面を開くボタン */}
         <nav className="row">
           {screen.name !== 'dashboard' && (
@@ -111,6 +143,9 @@ export default function App(): React.JSX.Element {
       </header>
       {screen.name === 'settings' && (
         <SettingsScreen
+          key={screen.section ?? ''}
+          section={screen.section}
+          update={update}
           status={status}
           onStatusChange={updateStatus}
           appearance={appearance}
@@ -121,6 +156,7 @@ export default function App(): React.JSX.Element {
       {screen.name === 'usage' && <UsageScreen />}
       {screen.name === 'search' && (
         <SearchScreen
+          focus={screen.focus}
           onOpen={(hit) => {
             // KEY-01: API キーが未設定の間はチャット・Cowork の画面を開かない
             if (!status.configured) {
@@ -139,6 +175,8 @@ export default function App(): React.JSX.Element {
       )}
       {screen.name === 'dashboard' && (
         <DashboardScreen
+          key={screen.createProject ?? ''}
+          openCreate={screen.createProject !== undefined}
           apiKeyConfigured={status.configured}
           onOpen={(project) => setScreen({ name: 'project', project })}
           onOpenSettings={() => setScreen({ name: 'settings' })}

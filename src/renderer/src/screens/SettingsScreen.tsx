@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
+import { SHORTCUTS } from '@shared/shortcuts'
 import { ACCENTS, MODES } from '@shared/theme'
 import type { AppInfo } from '@shared/ipc'
 import type {
@@ -6,28 +7,40 @@ import type {
   Appearance,
   BackupInfo,
   ChatPrefs,
+  LicenseList,
   ModelList,
+  UpdateStatus,
   UsageLimits
 } from '@shared/types'
 import { ApiKeyForm } from '../components/ApiKeyForm'
+import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
 import { unwrap } from '../lib/ipc'
 import { ja } from '../locales/ja'
 
 /**
- * 設定画面（要件 6.12 のうち API・モデル）
+ * 設定画面（要件 6.12）
  */
 export function SettingsScreen({
+  section,
+  update,
   status,
   onStatusChange,
   appearance,
   onAppearanceChange
 }: {
+  /** 開いたときに表示する位置 */
+  section?: 'about'
+  update: UpdateStatus | null
   status: ApiKeyStatus
   onStatusChange: (status: ApiKeyStatus) => void
   appearance: Appearance
   onAppearanceChange: (appearance: Appearance) => void
 }): React.JSX.Element {
+  useEffect(() => {
+    if (section) document.getElementById(`settings-${section}`)?.scrollIntoView()
+  }, [section])
+
   return (
     <main className="screen">
       <h1 className="screen-title">SETTINGS</h1>
@@ -36,10 +49,12 @@ export function SettingsScreen({
       <AppearanceSection appearance={appearance} onChange={onAppearanceChange} />
       <GlobalInstructionsSection />
       <ChatPrefsSection />
+      <ShortcutsSection />
       <CoworkPrefsSection />
       <UsageLimitsSection />
       <DataSection />
       <BackupSection />
+      <AboutSection update={update} />
     </main>
   )
 }
@@ -393,7 +408,6 @@ function DataSection(): React.JSX.Element {
           {ja.data.dataPath(info.dataPath)}
           <br />
           {ja.data.logPath(info.logPath)}
-          <br />v{info.version} / Electron {info.electron}
         </p>
       )}
     </section>
@@ -448,6 +462,235 @@ function BackupSection(): React.JSX.Element {
       </button>
       <Message message={message} />
     </section>
+  )
+}
+
+/**
+ * キーボードショートカットの一覧（CMN-02）
+ */
+function ShortcutsSection(): React.JSX.Element {
+  const [sendKey, setSendKey] = useState<ChatPrefs['sendKey']>('enter')
+  useEffect(() => {
+    let active = true
+    unwrap(window.lumina.chatPrefs.get())
+      .then((p) => active && setSendKey(p.sendKey))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
+
+  return (
+    <section className="panel" aria-labelledby="settings-shortcuts">
+      <h2 id="settings-shortcuts">{ja.shortcuts.section}</h2>
+      <dl className="shortcut-list">
+        {SHORTCUTS.map((s) => (
+          <div key={s.action}>
+            <dt>
+              <kbd>{s.keys}</kbd>
+            </dt>
+            <dd>{ja.shortcuts.actions[s.action]}</dd>
+          </div>
+        ))}
+        <div>
+          <dt>
+            <kbd>{ja.shortcuts.sendKeys[sendKey]}</kbd>
+          </dt>
+          <dd>{ja.shortcuts.send}</dd>
+        </div>
+      </dl>
+      <p className="hint">{ja.shortcuts.sendNote}</p>
+    </section>
+  )
+}
+
+/** 更新の状態の説明 */
+function updateText(update: UpdateStatus | null): string {
+  if (!update) return ja.update.unconfigured
+  if (update.error) return update.error
+  switch (update.state) {
+    case 'available':
+      return ja.update.available(update.version ?? '')
+    case 'downloading':
+      return ja.update.downloading(update.percent ?? 0)
+    case 'downloaded':
+      return ja.update.downloaded(update.version ?? '')
+    case 'checking':
+      return ja.update.checking
+    case 'latest':
+      return ja.update.latest
+    case 'idle':
+      return ja.update.idle
+    default:
+      return ja.update.unconfigured
+  }
+}
+
+/**
+ * アプリ情報（6.12: バージョン、更新確認、ライセンス表示。CMN-03）
+ */
+function AboutSection({ update }: { update: UpdateStatus | null }): React.JSX.Element {
+  const [info, setInfo] = useState<AppInfo | null>(null)
+  const [licenses, setLicenses] = useState<LicenseList | null>(null)
+  const [showLicenses, setShowLicenses] = useState(false)
+  const [confirmInstall, setConfirmInstall] = useState(false)
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  useEffect(() => {
+    let active = true
+    Promise.all([unwrap(window.lumina.app.getInfo()), unwrap(window.lumina.app.licenses())])
+      .then(([i, l]) => {
+        if (!active) return
+        setInfo(i)
+        setLicenses(l)
+      })
+      .catch((e: unknown) => active && setMessage({ tone: 'error', text: (e as Error).message }))
+    return () => {
+      active = false
+    }
+  }, [])
+
+  // 状態の変化は App が受け取って渡す（ここでは操作の失敗だけを表示する）
+  const run = async (action: () => Promise<unknown>): Promise<void> => {
+    setMessage(null)
+    try {
+      await action()
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
+  const state = update?.state ?? 'unconfigured'
+
+  return (
+    <section className="panel" aria-labelledby="settings-about">
+      <h2 id="settings-about">{ja.about.section}</h2>
+      {info && (
+        <p className="mono">
+          {ja.about.version(info.version)}
+          <br />
+          <span className="hint">{ja.about.runtime(info.electron, info.chrome, info.node)}</span>
+        </p>
+      )}
+
+      <h3 className="subhead">{ja.update.section}</h3>
+      <p className={update?.error ? 'message message-error' : 'hint'} role="status">
+        {updateText(update)}
+      </p>
+      {update?.checkedAt && (
+        <p className="hint">
+          {ja.update.checkedAt(new Date(update.checkedAt).toLocaleString('ja-JP'))}
+        </p>
+      )}
+      {update?.releaseNotes && (state === 'available' || state === 'downloaded') && (
+        <details style={{ marginBottom: '0.75rem' }}>
+          <summary>{ja.update.notes}</summary>
+          <div className="thinking-body">{update.releaseNotes}</div>
+        </details>
+      )}
+      <div className="row">
+        {state !== 'unconfigured' && state !== 'downloaded' && (
+          <button
+            className="btn"
+            type="button"
+            disabled={state === 'checking' || state === 'downloading'}
+            onClick={() => void run(() => unwrap(window.lumina.update.check()))}
+          >
+            {state === 'checking' ? ja.update.checking : ja.update.check}
+          </button>
+        )}
+        {/* CMN-03: ダウンロード・適用は、ユーザーの操作でのみ行う */}
+        {state === 'available' && (
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() => void run(() => unwrap(window.lumina.update.download()))}
+          >
+            {ja.update.download}
+          </button>
+        )}
+        {state === 'downloaded' && (
+          <button className="btn btn-primary" type="button" onClick={() => setConfirmInstall(true)}>
+            {ja.update.install}
+          </button>
+        )}
+      </div>
+
+      <h3 className="subhead">{ja.about.licenses}</h3>
+      {licenses?.appLicense && <p className="hint">{ja.about.appLicense(licenses.appLicense)}</p>}
+      {licenses && licenses.packages.length > 0 ? (
+        <button className="btn" type="button" onClick={() => setShowLicenses(true)}>
+          {ja.about.showLicenses(licenses.packages.length)}
+        </button>
+      ) : (
+        <p className="hint">{ja.about.noLicenses}</p>
+      )}
+      <p className="hint">{ja.about.chromiumNote}</p>
+      <Message message={message} />
+
+      {showLicenses && licenses && (
+        <LicensesDialog licenses={licenses} onClose={() => setShowLicenses(false)} />
+      )}
+      {confirmInstall && (
+        <ConfirmDialog
+          title={ja.update.installTitle}
+          confirmLabel={ja.update.install}
+          message={<p>{ja.update.installConfirm}</p>}
+          onCancel={() => setConfirmInstall(false)}
+          onConfirm={() => {
+            setConfirmInstall(false)
+            void run(() => unwrap(window.lumina.update.install()))
+          }}
+        />
+      )}
+    </section>
+  )
+}
+
+function LicensesDialog({
+  licenses,
+  onClose
+}: {
+  licenses: LicenseList
+  onClose: () => void
+}): React.JSX.Element {
+  const [filter, setFilter] = useState('')
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    return licenses.packages.filter((p) => p.name.toLowerCase().includes(q))
+  }, [licenses, filter])
+
+  return (
+    <Dialog
+      title={ja.about.licenses}
+      onClose={onClose}
+      footer={
+        <button className="btn" type="button" onClick={onClose} autoFocus>
+          {ja.about.close}
+        </button>
+      }
+    >
+      <input
+        className="input"
+        type="search"
+        placeholder={ja.about.filter}
+        aria-label={ja.about.filter}
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      <ul className="license-list">
+        {visible.map((p) => (
+          <li key={`${p.name}@${p.version}`}>
+            <details>
+              <summary className="mono">
+                {p.name} {p.version} <span className="hint">— {p.license}</span>
+              </summary>
+              <pre className="license-text">{p.text ?? ja.about.noText}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </Dialog>
   )
 }
 

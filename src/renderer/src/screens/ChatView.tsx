@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { expandCommand, parseCommandInput } from '@shared/commands'
 import { activePath, siblingsOf } from '@shared/conversation'
 import type {
@@ -19,6 +20,7 @@ import { ChangesPanel, PermissionDialog, TodoPanel, ToolEventList } from '../com
 import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Markdown } from '../components/Markdown'
 import { unwrap } from '../lib/ipc'
+import { useShortcuts } from '../lib/useShortcuts'
 import { ja } from '../locales/ja'
 
 interface Live {
@@ -26,6 +28,12 @@ interface Live {
   thinking: string
   retry: string | null
 }
+
+/** 会話の一覧に並べる行（10.1: 仮想スクロールで、画面に見えている行だけを描画する） */
+type LogRow =
+  | { kind: 'summary'; key: string }
+  | { kind: 'message'; key: string; message: Message; first: boolean }
+  | { kind: 'regenerate'; key: string; userMessageId: string }
 
 const formatTime = (epoch: number): string =>
   new Date(epoch).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'medium' })
@@ -208,23 +216,60 @@ export function ChatView({
       active = false
     }
   }, [threadId, focusMessageId])
-  useEffect(() => {
-    if (!highlight) return
-    document
-      .querySelector(`[data-message-id="${CSS.escape(highlight)}"]`)
-      ?.scrollIntoView({ block: 'center' })
-    const timer = setTimeout(() => setHighlight(null), 3000)
-    return () => clearTimeout(timer)
-  }, [highlight, path])
   const generating = path.some((m) => m.status === 'streaming')
   const latestUserId = [...path].reverse().find((m) => m.role === 'user')?.id ?? null
   const last = path.at(-1)
 
-  // 末尾付近を見ているときだけ自動でスクロールする
+  const rows = useMemo<LogRow[]>(() => {
+    const list: LogRow[] = []
+    if (summary) list.push({ kind: 'summary', key: 'summary' })
+    path.forEach((m, i) => list.push({ kind: 'message', key: m.id, message: m, first: i === 0 }))
+    if (
+      last?.role === 'assistant' &&
+      !generating &&
+      // CHT-06: 通常チャットは完了した応答も再生成できる
+      (!cowork || ['error', 'stopped', 'interrupted'].includes(last.status)) &&
+      latestUserId
+    ) {
+      list.push({ kind: 'regenerate', key: 'regenerate', userMessageId: latestUserId })
+    }
+    return list
+  }, [summary, path, last, generating, cowork, latestUserId])
+
+  // 10.1: 長い会話でも滑らかに動くよう、見えている行（と前後の数行）だけを描画する。
+  // 行の高さは描画後に測り直す（Markdown・思考の要約・生成中の伸びに追従する）
+  // React Compiler は使っていないため、メモ化できない API の警告は対象外
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => logRef.current,
+    estimateSize: () => 160,
+    overscan: 6,
+    getItemKey: (index) => rows[index].key
+  })
+  const totalSize = virtualizer.getTotalSize()
+
+  // 該当の行が読み込まれたら、1 回だけその位置まで移動する
+  const scrolledFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!highlight || scrolledFor.current === highlight) return
+    const index = rows.findIndex((r) => r.key === highlight)
+    if (index === -1) return
+    scrolledFor.current = highlight
+    stickToBottom.current = false
+    virtualizer.scrollToIndex(index, { align: 'center' })
+  }, [highlight, rows, virtualizer])
+  useEffect(() => {
+    if (!highlight) return
+    const timer = setTimeout(() => setHighlight(null), 3000)
+    return () => clearTimeout(timer)
+  }, [highlight])
+
+  // 末尾付近を見ているときだけ自動でスクロールする（行の高さを測り直したときも追従する）
   useEffect(() => {
     const el = logRef.current
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
-  }, [path, live])
+  }, [rows, live, totalSize])
 
   const addMessages = (...added: Message[]): void => {
     setMessages((list) => [...list, ...added])
@@ -306,15 +351,8 @@ export function ChatView({
 
   const stop = useCallback(() => void window.lumina.chat.stop(threadId), [threadId])
 
-  // Esc で生成を停止する（ショートカット）
-  useEffect(() => {
-    if (!generating) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') stop()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [generating, stop])
+  // CMN-02: Esc で生成を停止する（確認ダイアログを閉じる Esc では停止しない）
+  useShortcuts(generating ? { stop } : {})
 
   const regenerate = async (userMessageId: string): Promise<void> => {
     setError(null)
@@ -376,6 +414,55 @@ export function ChatView({
     }
   }
 
+  const renderRow = (row: LogRow): React.ReactNode => {
+    if (row.kind === 'summary') {
+      return (
+        <details className="summary-note">
+          <summary>{ja.chat.summaryNote}</summary>
+          <div className="thinking-body">{summary}</div>
+        </details>
+      )
+    }
+    if (row.kind === 'regenerate') {
+      return (
+        <div className="row" style={{ marginTop: '0.5rem' }}>
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={() => void regenerate(row.userMessageId)}
+          >
+            {ja.chat.regenerate}
+          </button>
+        </div>
+      )
+    }
+    const m = row.message
+    return m.role === 'user' ? (
+      <UserRow
+        message={m}
+        first={row.first}
+        highlighted={m.id === highlight}
+        // CHT-06: 通常チャットはどのメッセージも編集できる。Cowork は最新の指示のみ（CHT-14）
+        editable={!generating && (!cowork || m.id === latestUserId)}
+        branch={branchNav(m)}
+        allowAttachments={!cowork}
+        onResend={(content, keep, added) => resend(m, content, keep, added)}
+        onError={fail}
+      />
+    ) : (
+      <AssistantRow
+        message={m}
+        first={row.first}
+        highlighted={m.id === highlight}
+        live={live[m.id]}
+        cowork={cowork}
+        tools={cowork ? tools.filter((t) => t.message_id === m.id) : []}
+        generating={generating}
+        branch={branchNav(m)}
+      />
+    )
+  }
+
   return (
     <div className="chat">
       <div
@@ -388,54 +475,23 @@ export function ChatView({
         role="log"
         aria-live="polite"
       >
-        {summary && (
-          <details className="summary-note">
-            <summary>{ja.chat.summaryNote}</summary>
-            <div className="thinking-body">{summary}</div>
-          </details>
-        )}
         {path.length === 0 && <p className="empty">{ja.chat.empty}</p>}
-        {path.map((m) =>
-          m.role === 'user' ? (
-            <UserRow
-              key={m.id}
-              message={m}
-              highlighted={m.id === highlight}
-              // CHT-06: 通常チャットはどのメッセージも編集できる。Cowork は最新の指示のみ（CHT-14）
-              editable={!generating && (!cowork || m.id === latestUserId)}
-              branch={branchNav(m)}
-              allowAttachments={!cowork}
-              onResend={(content, keep, added) => resend(m, content, keep, added)}
-              onError={fail}
-            />
-          ) : (
-            <AssistantRow
-              key={m.id}
-              message={m}
-              highlighted={m.id === highlight}
-              live={live[m.id]}
-              cowork={cowork}
-              tools={cowork ? tools.filter((t) => t.message_id === m.id) : []}
-              generating={generating}
-              branch={branchNav(m)}
-            />
-          )
-        )}
-        {last?.role === 'assistant' &&
-          !generating &&
-          // CHT-06: 通常チャットは完了した応答も再生成できる
-          (!cowork || ['error', 'stopped', 'interrupted'].includes(last.status)) &&
-          latestUserId && (
-            <div className="row" style={{ marginTop: '0.5rem' }}>
-              <button
-                className="btn btn-sm"
-                type="button"
-                onClick={() => void regenerate(latestUserId)}
+        <div className="log-rows" style={{ height: totalSize }}>
+          {virtualizer.getVirtualItems().map((item) => {
+            const row = rows[item.index]
+            return (
+              <div
+                key={item.key}
+                className="log-slot"
+                data-index={item.index}
+                ref={virtualizer.measureElement}
+                style={{ transform: `translateY(${item.start}px)` }}
               >
-                {ja.chat.regenerate}
-              </button>
-            </div>
-          )}
+                {renderRow(row)}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {error && (
@@ -561,6 +617,7 @@ export function ChatView({
 
 function UserRow({
   message,
+  first,
   highlighted,
   editable,
   allowAttachments,
@@ -569,6 +626,8 @@ function UserRow({
   onError
 }: {
   message: Message
+  /** 会話の最初の行（区切り線を引かない） */
+  first: boolean
   highlighted: boolean
   editable: boolean
   allowAttachments: boolean
@@ -602,7 +661,7 @@ function UserRow({
 
   return (
     <article
-      className={`log-row log-user${highlighted ? ' highlighted' : ''}`}
+      className={`log-row log-user${first ? ' first' : ''}${highlighted ? ' highlighted' : ''}`}
       data-message-id={message.id}
     >
       <header className="log-head">
@@ -661,6 +720,7 @@ function UserRow({
 
 function AssistantRow({
   message,
+  first,
   highlighted,
   live,
   cowork,
@@ -669,6 +729,7 @@ function AssistantRow({
   branch
 }: {
   message: Message
+  first: boolean
   highlighted: boolean
   live?: Live
   cowork: boolean
@@ -682,7 +743,7 @@ function AssistantRow({
 
   return (
     <article
-      className={`log-row log-assistant${highlighted ? ' highlighted' : ''}`}
+      className={`log-row log-assistant${first ? ' first' : ''}${highlighted ? ' highlighted' : ''}`}
       data-message-id={message.id}
       aria-busy={streaming}
     >

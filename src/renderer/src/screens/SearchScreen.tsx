@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Project, ProjectType, SearchHit } from '@shared/types'
 import { Message, type MessageState } from '../components/Message'
 import { TypeBadge } from '../components/TypeBadge'
@@ -25,13 +25,26 @@ function Snippet({ text }: { text: string }): React.JSX.Element {
 /**
  * 横断検索（要件 SRC-01、SRC-02、DSH-09）。結果からスレッドの該当メッセージへ移動できる
  */
-export function SearchScreen({ onOpen }: { onOpen: (hit: SearchHit) => void }): React.JSX.Element {
+export function SearchScreen({
+  focus,
+  onOpen
+}: {
+  /** 値が変わるたびに検索欄へフォーカスする（CMN-02: Ctrl+K） */
+  focus?: number
+  onOpen: (hit: SearchHit) => void
+}): React.JSX.Element {
   const [text, setText] = useState('')
   const [projectId, setProjectId] = useState('')
   const [projectType, setProjectType] = useState<ProjectType | ''>('')
   const [projects, setProjects] = useState<Project[]>([])
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [message, setMessage] = useState<MessageState | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [focus])
 
   useEffect(() => {
     let active = true
@@ -74,7 +87,7 @@ export function SearchScreen({ onOpen }: { onOpen: (hit: SearchHit) => void }): 
         <input
           className="input"
           type="search"
-          autoFocus
+          ref={inputRef}
           placeholder={ja.search.placeholder}
           aria-label={ja.search.placeholder}
           value={text}

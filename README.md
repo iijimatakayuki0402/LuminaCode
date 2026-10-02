@@ -29,15 +29,16 @@ node node_modules/electron/install.js                 # Electron 本体の取得
 
 ## コマンド
 
-| コマンド                          | 内容                                  |
-| --------------------------------- | ------------------------------------- |
-| `npm run dev`                     | 開発起動（ホットリロード）            |
-| `npm run build`                   | 型チェック＋ビルド（`out/` に出力）   |
-| `npm run typecheck`               | 型チェック                            |
-| `npm run lint` / `npm run format` | Lint ／ 整形                          |
-| `npm test`                        | テスト（Vitest）                      |
-| `npm run test:electron`           | テストを Electron のランタイムで実行  |
-| `npm run dist`                    | Windows インストーラー作成（`dist/`） |
+| コマンド                          | 内容                                                                        |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| `npm run dev`                     | 開発起動（ホットリロード）                                                  |
+| `npm run build`                   | 型チェック＋ビルド（`out/` に出力）                                         |
+| `npm run typecheck`               | 型チェック                                                                  |
+| `npm run lint` / `npm run format` | Lint ／ 整形                                                                |
+| `npm test`                        | テスト（Vitest）                                                            |
+| `npm run test:electron`           | テストを Electron のランタイムで実行                                        |
+| `npm run dist`                    | Windows インストーラー作成（`dist/`）                                       |
+| `npm run licenses`                | 同梱ライセンス一覧の作成（`resources/licenses.json`。`build` でも自動実行） |
 
 ## 技術検証スクリプト（Phase 0）
 
@@ -70,3 +71,17 @@ scripts/     環境構築・運用スクリプト
 - API キーの暗号化に使う鍵は、データ保存先の `Local State` に（DPAPI で保護されて）保存されます。`api-key.bin` だけを別の場所へコピーしても復号できません。バックアップ・復元を実装する際は注意してください。
 - Cowork は Agent SDK（同梱の `claude.exe`）を作業フォルダで実行します。SDK の設定・セッションはデータ保存先の `agent\` に保存し、ユーザーの `~/.claude` や作業フォルダの `.claude\settings.json`（hooks など）は読み込みません。すべてのツール実行はアプリの PreToolUse フックで判定します（`src/main/cowork/policy.ts`）。
 - 開発時（パッケージ化していない場合）は、環境変数 `LUMINA_USER_DATA_DIR` でデータ保存先を切り替えられます（動作確認で本来のデータを汚さないため）。
+
+## 更新の配信（CMN-03）
+
+- 更新の配信元は未設定です。設定するまで、アプリは更新を確認しません（設定画面に「配信元が設定されていない」と表示します）。
+- 配信元を決めたら、`electron-builder.yml` の `publish` を設定してから `npm run dist` を実行します（例は同ファイルのコメントを参照）。ビルドすると `resources\app-update.yml` が作られ、更新を確認できるようになります。`dist/` にできる `latest.yml` とインストーラー（`.exe`・`.blockmap`）を配信元に置きます。
+- 更新は起動の 10 秒後と、設定画面の「更新を確認」で確認します。ダウンロードとインストール（再起動）は、どちらもユーザーが操作したときだけ行います。
+- インストーラーにはコード署名をしていません。改ざんの検出は `latest.yml` の SHA-512 だけで行うため、配信元は HTTPS にしてください。
+- 開発時に確認の動作を試す場合は、プロジェクト直下に `dev-app-update.yml`（`provider: generic`、`url: ...`）を置きます（Git の管理対象外です。インストールはできません）。
+
+## アンインストール（10.4）
+
+- アンインストールの途中で、アプリのデータ（`%APPDATA%\LuminaCode`）も削除するかを確認します。既定は「いいえ（残す）」です。
+- 更新によるアンインストールのときと、サイレント実行（`/S`）のときは、確認せずにデータを残します。
+- Cowork の作業フォルダ（その中の `.lumina-trash` も含めて）は削除しません。処理は `build/installer.nsh` にあります。

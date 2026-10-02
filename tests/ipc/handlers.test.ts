@@ -12,6 +12,7 @@ import type { IpcChannel, IpcResult } from '../../src/shared/ipc'
 import type { ApiKeyStatus, Appearance, ModelList, Project, Thread } from '../../src/shared/types'
 import { createInMemoryDatabase } from '../../src/main/db/init'
 import { createHandlers, type IpcHandlers } from '../../src/main/ipc/handlers'
+import { UpdateService } from '../../src/main/update/updateService'
 import { invokeHandler } from '../../src/main/ipc/register'
 import { AttachmentStore } from '../../src/main/chat/attachments'
 import { ChatService } from '../../src/main/chat/chatService'
@@ -116,13 +117,23 @@ beforeEach(() => {
       version: '0.1.0',
       electron: 'e',
       chrome: 'c',
+      node: 'n',
       dataPath: 'C:\\data',
       pricingPath: 'p',
       logPath: 'l',
       backupPath: 'b'
     },
     openTextFile: async () => importText,
-    backupDir: join(dir, 'backups')
+    backupDir: join(dir, 'backups'),
+    readLicenses: () => ({ appLicense: null, packages: [] }),
+    update: new UpdateService({
+      configured: false,
+      currentVersion: '0.1.0',
+      createUpdater: () => {
+        throw new Error('not configured')
+      },
+      emit: () => undefined
+    })
   })
 })
 

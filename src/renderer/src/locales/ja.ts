@@ -438,5 +438,54 @@ export const ja = {
     modes: { dark: 'ダーク', light: 'ライト', system: '標準（OS の設定に従う）' },
     accent: 'アクセントカラー',
     accents: { purple: '薄紫', cyan: '水色', red: '薄い赤' }
+  },
+  shortcuts: {
+    section: 'キーボードショートカット',
+    actions: {
+      newThread: '新規スレッド（プロジェクトの画面で）',
+      newProject: '新規プロジェクト',
+      search: '横断検索',
+      settings: '設定を開く',
+      stop: '生成／実行の停止'
+    },
+    send: '送信',
+    sendKeys: { enter: 'Enter', ctrl_enter: 'Ctrl+Enter' },
+    sendNote: '送信キーは「送信キー」の設定で切り替えられます。'
+  },
+  about: {
+    section: 'アプリ情報',
+    version: (version: string) => `Lumina Code バージョン ${version}`,
+    runtime: (electron: string, chrome: string, node: string) =>
+      `Electron ${electron} / Chromium ${chrome} / Node.js ${node}`,
+    appLicense: (license: string) => `本体のライセンス: ${license}`,
+    licenses: 'オープンソースのライセンス',
+    showLicenses: (count: number) => `ライセンスを表示（${count} 件）`,
+    noLicenses: 'ライセンス情報がありません（npm run licenses で作成します）。',
+    chromiumNote:
+      'Chromium のライセンスは、インストール先の LICENSES.chromium.html に収録しています。',
+    filter: 'パッケージ名で絞り込み',
+    noText: '（ライセンス文は同梱されていません）',
+    close: '閉じる'
+  },
+  update: {
+    section: '更新',
+    check: '更新を確認',
+    checking: '確認しています…',
+    unconfigured: '更新の配信元が設定されていないため、更新は確認できません。',
+    idle: 'まだ確認していません。',
+    latest: '最新のバージョンです。',
+    available: (version: string) => `新しいバージョン ${version} があります。`,
+    download: 'ダウンロード',
+    downloading: (percent: number) => `ダウンロードしています…（${percent}%）`,
+    downloaded: (version: string) =>
+      `バージョン ${version} のダウンロードが完了しました。再起動すると更新されます。`,
+    install: '再起動して更新',
+    installTitle: '再起動して更新',
+    installConfirm:
+      'アプリを終了して、更新をインストールします。生成中の応答・Cowork の実行は停止し、ここまでの内容を保存します。',
+    checkedAt: (date: string) => `最終確認: ${date}`,
+    notes: '更新内容',
+    banner: (version: string) => `新しいバージョン ${version} があります`,
+    bannerReady: (version: string) => `バージョン ${version} に更新できます`
   }
 } as const

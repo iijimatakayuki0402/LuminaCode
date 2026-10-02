@@ -1,10 +1,11 @@
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, Notification, safeStorage, shell } from 'electron'
-import { CHAT_EVENT_CHANNEL } from '@shared/ipc'
-import type { ChatEvent } from '@shared/types'
+import { autoUpdater } from 'electron-updater'
+import { CHAT_EVENT_CHANNEL, UPDATE_EVENT_CHANNEL } from '@shared/ipc'
+import type { ChatEvent, LicenseList } from '@shared/types'
 import { createAnthropicClient } from './api/client'
 import { AttachmentStore } from './chat/attachments'
 import { ChatService } from './chat/chatService'
@@ -18,6 +19,7 @@ import { deleteToolEventsBefore, LOG_RETENTION_DAYS } from './cowork/toolEvents'
 import { installAppLog } from './logging/appLog'
 import { runDailyBackup } from './data/backup'
 import { UsageService } from './usage/usageService'
+import { UpdateService } from './update/updateService'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
 import { closeDatabase, DatabaseIntegrityError, getDatabase } from './db/init'
 import { getMessage } from './db/operations'
@@ -81,6 +83,61 @@ function createWindow(): void {
 
 let chatService: ChatService | null = null
 let coworkService: CoworkService | null = null
+let updateService: UpdateService | null = null
+
+/**
+ * 生成中の応答・Cowork の実行を停止し、保存が終わるまで待つ（最大 3 秒。CHT-04）
+ */
+async function stopAllRuns(): Promise<void> {
+  for (const threadId of chatService?.activeThreadIds() ?? []) chatService?.stop(threadId)
+  for (const threadId of coworkService?.activeThreadIds() ?? []) coworkService?.stop(threadId)
+  await Promise.race([
+    Promise.all([chatService?.whenIdle(), coworkService?.whenIdle()]),
+    new Promise((r) => setTimeout(r, 3000))
+  ])
+}
+
+/**
+ * 同梱しているオープンソースのライセンス（scripts/generate-licenses.mjs がビルド時に作る）
+ */
+function readLicenses(): LicenseList {
+  const path = app.isPackaged
+    ? join(process.resourcesPath, 'licenses.json')
+    : join(app.getAppPath(), 'resources', 'licenses.json')
+  if (!existsSync(path)) return { appLicense: null, packages: [] }
+  return JSON.parse(readFileSync(path, 'utf-8')) as LicenseList
+}
+
+/**
+ * 更新（CMN-03、10.4）
+ * 配信元は electron-builder.yml の publish で設定する（ビルド時に resources\app-update.yml が作られる）。
+ * 開発時は、プロジェクト直下に dev-app-update.yml を置いた場合のみ確認できる（インストールはできない）。
+ */
+function createUpdateService(): UpdateService {
+  const devConfig = join(app.getAppPath(), 'dev-app-update.yml')
+  const configured = app.isPackaged
+    ? existsSync(join(process.resourcesPath, 'app-update.yml'))
+    : existsSync(devConfig)
+  return new UpdateService({
+    configured,
+    currentVersion: app.getVersion(),
+    createUpdater: () => {
+      // Web インストーラーは使わない（通常の NSIS インストーラーで配信する）
+      autoUpdater.disableWebInstaller = true
+      if (!app.isPackaged) {
+        autoUpdater.forceDevUpdateConfig = true
+        autoUpdater.updateConfigPath = devConfig
+      }
+      return autoUpdater
+    },
+    emit: (status) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send(UPDATE_EVENT_CHANNEL, status)
+      }
+    },
+    prepareInstall: stopAllRuns
+  })
+}
 
 /**
  * 同梱の claude.exe のパス（パッケージ化したアプリでは asar の外に展開されている）
@@ -205,6 +262,8 @@ function setupBackend(): boolean {
     emit: emitToAll
   })
 
+  updateService = createUpdateService()
+
   // 10.2: DB を日次でバックアップする（直近 7 世代）
   const backupDir = join(app.getPath('userData'), 'backups')
   void runDailyBackup(db, backupDir).catch((error) =>
@@ -259,6 +318,8 @@ function setupBackend(): boolean {
         return readFileSync(path, 'utf-8')
       },
       backupDir,
+      readLicenses,
+      update: updateService,
       selectFiles: async () => {
         const owner = BrowserWindow.getFocusedWindow()
         const options: Electron.OpenDialogOptions = { properties: ['openFile', 'multiSelections'] }
@@ -288,6 +349,7 @@ function setupBackend(): boolean {
         version: app.getVersion(),
         electron: process.versions.electron,
         chrome: process.versions.chrome,
+        node: process.versions.node,
         dataPath: app.getPath('userData'),
         pricingPath: usage.pricingFile,
         logPath: appLogPath,
@@ -306,6 +368,8 @@ void app.whenReady().then(() => {
   }
 
   createWindow()
+  // 10.4: 起動時に更新を確認する（起動を遅らせないよう、少し待ってから。配信元が未設定なら何もしない）
+  setTimeout(() => void updateService?.check(), 10_000)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -321,12 +385,7 @@ app.on('before-quit', (event) => {
   if (quitting || !chatService) return
   quitting = true
   event.preventDefault()
-  for (const threadId of chatService.activeThreadIds()) chatService.stop(threadId)
-  for (const threadId of coworkService?.activeThreadIds() ?? []) coworkService?.stop(threadId)
-  void Promise.race([
-    Promise.all([chatService.whenIdle(), coworkService?.whenIdle()]),
-    new Promise((r) => setTimeout(r, 3000))
-  ]).then(() => app.quit())
+  void stopAllRuns().then(() => app.quit())
 })
 
 app.on('will-quit', () => {

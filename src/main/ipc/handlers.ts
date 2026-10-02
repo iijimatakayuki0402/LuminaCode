@@ -41,7 +41,8 @@ import {
 } from '../cowork/extensions'
 import type { McpStore } from '../cowork/mcpStore'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
-import type { AttachmentInfo, StageResult } from '@shared/types'
+import type { AttachmentInfo, LicenseList, StageResult } from '@shared/types'
+import type { UpdateService } from '../update/updateService'
 import { NotFoundError } from './errors'
 import * as v from './validate'
 
@@ -71,6 +72,10 @@ export interface HandlerDeps {
   openTextFile: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>
   /** DB のバックアップ先（10.2） */
   backupDir: string
+  /** 同梱しているオープンソースのライセンス（6.12） */
+  readLicenses: () => LicenseList
+  /** 更新（CMN-03） */
+  update: UpdateService
 }
 
 /** 複数ファイルを仮置きし、失敗したものは理由をまとめて返す */
@@ -116,7 +121,9 @@ export function createHandlers({
   attachments,
   saveFile,
   openTextFile,
-  backupDir
+  backupDir,
+  readLicenses,
+  update
 }: HandlerDeps): IpcHandlers {
   // 読み込み前に確認した内容（確定するまで main で保持する）
   const pendingImports = new Map<string, ProjectBundle>()
@@ -149,6 +156,12 @@ export function createHandlers({
 
   return {
     'app:getInfo': () => appInfo,
+    'app:licenses': () => readLicenses(),
+
+    'update:getStatus': () => update.getStatus(),
+    'update:check': () => update.check(),
+    'update:download': () => update.download(),
+    'update:install': () => update.install(),
 
     'projects:list': (options) =>
       ops.listProjects(db, v.optional(v.listProjectsOptions)(options, 'options')),

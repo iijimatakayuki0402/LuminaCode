@@ -8,3 +8,7 @@ dist/
 .vscode/
 *.db
 *.sqlite
+# ビルド時に作る（scripts/generate-licenses.mjs）
+resources/licenses.json
+# 開発時に更新確認を試す場合の設定（electron-updater）
+dev-app-update.yml
