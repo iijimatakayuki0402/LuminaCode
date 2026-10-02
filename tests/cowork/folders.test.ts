@@ -22,7 +22,7 @@ let projectId: string
 const policy = () => ({
   userDataPath: join(base, 'userData'),
   homeDir: join(base, 'home', 'user'),
-  systemRoot: 'C:\Windows'
+  systemRoot: String.raw`C:\Windows`
 })
 
 beforeEach(() => {

@@ -214,7 +214,7 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
     const policy = {
       userDataPath: join(base, 'ud'),
       homeDir: join(base, 'h', 'u'),
-      systemRoot: 'C:\Windows'
+      systemRoot: String.raw`C:\Windows`
     }
     addFolder(db, projectId, work, rw, 'write', policy)
     addFolder(db, projectId, work, ro, 'read', policy)
