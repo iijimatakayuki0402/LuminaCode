@@ -11,8 +11,17 @@ export type StreamBehavior =
       thinking?: string
       stopReason?: string
       usage?: { input_tokens: number; output_tokens: number }
-      /** Web 検索（CHT-11）: 本文の前に検索ブロックを返す。citations は本文に付ける引用 */
-      search?: { query: string; citations?: { url: string; title: string }[]; requests?: number }
+      /**
+       * Web 検索（CHT-11）: 本文の前に検索ブロックを返す。citations は本文に付ける引用
+       * filtered: 結果を絞り込む版の形（コード実行から検索を呼び、検索語は最初から入っている。本文に引用は無い）
+       */
+      search?: {
+        query: string
+        citations?: { url: string; title: string }[]
+        results?: { url: string; title: string }[]
+        requests?: number
+        filtered?: boolean
+      }
     }
   | { error: unknown }
   /** 差分を送った後、停止されるまで待つ */
@@ -51,8 +60,30 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
       if (thinking)
         yield { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking } }
       const search = 'search' in behavior ? behavior.search : undefined
-      if (search) {
-        yield { type: 'content_block_start', content_block: { type: 'server_tool_use' } }
+      if (search?.filtered) {
+        yield {
+          type: 'content_block_start',
+          content_block: { type: 'server_tool_use', name: 'code_execution', input: {} }
+        }
+        yield {
+          type: 'content_block_delta',
+          delta: { type: 'input_json_delta', partial_json: '{"code":"r=await web_search(...)"}' }
+        }
+        yield { type: 'content_block_stop' }
+        yield {
+          type: 'content_block_start',
+          content_block: {
+            type: 'server_tool_use',
+            name: 'web_search',
+            input: { query: search.query }
+          }
+        }
+        yield { type: 'content_block_stop' }
+      } else if (search) {
+        yield {
+          type: 'content_block_start',
+          content_block: { type: 'server_tool_use', name: 'web_search', input: {} }
+        }
         yield {
           type: 'content_block_delta',
           delta: { type: 'input_json_delta', partial_json: JSON.stringify({ query: search.query }) }
@@ -84,7 +115,11 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
                   name: 'web_search',
                   input: { query: search.query }
                 },
-                { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_1', content: [] }
+                {
+                  type: 'web_search_tool_result',
+                  tool_use_id: 'srvtoolu_1',
+                  content: (search.results ?? []).map((r) => ({ type: 'web_search_result', ...r }))
+                }
               ]
             : []),
           {

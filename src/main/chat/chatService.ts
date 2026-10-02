@@ -52,7 +52,18 @@ const DEFAULT_MAX_TOKENS = 64_000
 /** CHT-11: 1 回の応答で行う Web 検索の上限と、pause_turn で続きを頼む回数の上限 */
 const WEB_SEARCH_MAX_USES = 5
 const MAX_CONTINUATIONS = 5
-const SERVER_TOOL_BLOCKS = new Set(['server_tool_use', 'web_search_tool_result'])
+const SEARCH_OMITTED_NOTE =
+  '（この回答は Web 検索の結果をもとにしています。検索結果そのものは省略しています。）'
+/** 引用が無い場合に示す検索結果の上限 */
+const MAX_SEARCH_RESULTS = 10
+/** サーバー側のツール（Web 検索と、結果の絞り込みに使うコード実行）のブロック */
+const SERVER_TOOL_BLOCKS = new Set([
+  'server_tool_use',
+  'web_search_tool_result',
+  'code_execution_tool_result',
+  'bash_code_execution_tool_result',
+  'text_editor_code_execution_tool_result'
+])
 const TITLE_LENGTH = 40
 
 export interface ChatServiceDeps {
@@ -351,7 +362,8 @@ export class ChatService {
     threadId: string,
     assistantId: string,
     thinking: boolean,
-    webSearch: boolean
+    /** 検索のブロックを残すか（false は本文だけにする。ツールを渡さない要約で使う） */
+    keepServerTools: boolean
   ): Anthropic.Beta.BetaMessageParam[] {
     const path = this.path(threadId).filter((m) => m.id !== assistantId)
     const attachments = new Map<string, ops.AttachmentRecord[]>()
@@ -369,9 +381,11 @@ export class ChatService {
         messages.push({ role: 'user', content: blocks })
       } else if (m.status === 'complete' && m.content_blocks) {
         const blocks = JSON.parse(m.content_blocks) as Anthropic.Beta.BetaContentBlockParam[]
-        // CHT-11: Web 検索をオフにした後は、検索を含む回答を本文だけにして送る（ツールの定義が無いため）
-        if (!webSearch && blocks.some((b) => SERVER_TOOL_BLOCKS.has(b.type))) {
-          messages.push({ role: 'assistant', content: [{ type: 'text', text: m.content }] })
+        // CHT-11: ツールを渡さないリクエストでは、検索を含む回答を本文だけにして送る
+        if (!keepServerTools && blocks.some((b) => SERVER_TOOL_BLOCKS.has(b.type))) {
+          // 検索結果が無いと「調べていない」と誤解されるため、もとにしたことを書き添える
+          const text = [m.content, SEARCH_OMITTED_NOTE].join('\n\n')
+          messages.push({ role: 'assistant', content: [{ type: 'text', text }] })
           continue
         }
         messages.push({
@@ -419,12 +433,26 @@ export class ChatService {
       project.custom_instructions,
       thread?.context_summary
     )
-    const buildParams = (): Anthropic.Beta.MessageCreateParamsStreaming => ({
+    const buildParams = (): Anthropic.Beta.MessageCreateParamsStreaming => {
+      // 思考を止める場合は、以前の思考ブロックを送り返さない
+      const history = this.buildMessages(threadId, assistantId, mode === 'on', true)
+      // CHT-11: 検索をオフにした後も、以前の検索結果は残して送る（本文だけにすると「調べていない」と誤解される）。
+      // その場合は検索ツールを定義したうえで、使わせない（tool_choice: none）
+      const searchedBefore = history.some(
+        (m) =>
+          Array.isArray(m.content) &&
+          m.content.some((b) => SERVER_TOOL_BLOCKS.has((b as { type: string }).type))
+      )
+      return buildRequest(history, searchedBefore)
+    }
+    const buildRequest = (
+      history: Anthropic.Beta.BetaMessageParam[],
+      searchedBefore: boolean
+    ): Anthropic.Beta.MessageCreateParamsStreaming => ({
       model,
       max_tokens: Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS),
-      // 思考を止める場合は、以前の思考ブロックを送り返さない
       messages: [
-        ...this.buildMessages(threadId, assistantId, mode === 'on', webSearch),
+        ...history,
         ...(paused.length > 0
           ? [
               {
@@ -434,7 +462,8 @@ export class ChatService {
             ]
           : [])
       ],
-      ...(webSearch ? { tools: [webTool] } : {}),
+      ...(webSearch || searchedBefore ? { tools: [webTool] } : {}),
+      ...(!webSearch && searchedBefore ? { tool_choice: { type: 'none' as const } } : {}),
       stream: true,
       // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
       cache_control: { type: 'ephemeral' },
@@ -492,9 +521,16 @@ export class ChatService {
               Object.assign(usage, pickUsage(event.usage))
             } else if (
               event.type === 'content_block_start' &&
-              event.content_block.type === 'server_tool_use'
+              event.content_block.type === 'server_tool_use' &&
+              event.content_block.name === 'web_search'
             ) {
-              searchInput = ''
+              // 結果を絞り込む版では、コード実行から呼ばれた検索の語が最初から入っている
+              const query = (event.content_block.input as { query?: unknown } | null)?.query
+              if (typeof query === 'string' && query !== '') {
+                emit({ type: 'webSearch', threadId, messageId: assistantId, query })
+              } else {
+                searchInput = ''
+              }
             } else if (event.type === 'content_block_stop' && searchInput !== null) {
               // CHT-11: 検索している語を画面に出す
               emit({
@@ -829,23 +865,35 @@ function queryOf(input: string): string {
   }
 }
 
-/** 回答の引用元（CHT-11）。web_search_result_location の引用を URL ごとにまとめる */
+/**
+ * 回答の出典（CHT-11）。本文の引用（web_search_result_location）を URL ごとにまとめる。
+ * 結果を絞り込む版では本文に引用が付かないことがあるため、その場合は検索結果を（引用ではないと示して）返す
+ */
 function sourcesOf(record: ops.MessageRecord): WebSource[] {
   if (!record.content_blocks) return []
-  const seen = new Map<string, WebSource>()
+  const cited = new Map<string, WebSource>()
+  const results = new Map<string, WebSource>()
   try {
     for (const block of JSON.parse(record.content_blocks) as {
       type: string
       citations?: { type: string; url?: string; title?: string | null }[] | null
+      content?: unknown
     }[]) {
       for (const c of block.citations ?? []) {
-        if (c.type === 'web_search_result_location' && c.url && !seen.has(c.url)) {
-          seen.set(c.url, { url: c.url, title: c.title ?? null })
+        if (c.type === 'web_search_result_location' && c.url && !cited.has(c.url)) {
+          cited.set(c.url, { url: c.url, title: c.title ?? null, cited: true })
+        }
+      }
+      if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
+        for (const r of block.content as { type?: string; url?: string; title?: string }[]) {
+          if (r.type === 'web_search_result' && r.url && !results.has(r.url)) {
+            results.set(r.url, { url: r.url, title: r.title ?? null, cited: false })
+          }
         }
       }
     }
   } catch {
     return []
   }
-  return [...seen.values()]
+  return cited.size > 0 ? [...cited.values()] : [...results.values()].slice(0, MAX_SEARCH_RESULTS)
 }

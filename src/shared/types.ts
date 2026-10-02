@@ -109,6 +109,8 @@ export interface Message {
 export interface WebSource {
   url: string
   title: string | null
+  /** 本文で引用されたか（false は検索結果。結果を絞り込む版では引用が付かないことがある） */
+  cited: boolean
 }
 
 export interface Setting {

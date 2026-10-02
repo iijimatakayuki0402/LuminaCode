@@ -785,7 +785,11 @@ function AssistantRow({
       {/* CHT-11: Web 検索の出典 */}
       {!streaming && message.sources.length > 0 && (
         <details className="sources">
-          <summary>{ja.chat.sources(message.sources.length)}</summary>
+          <summary>
+            {message.sources.some((s) => s.cited)
+              ? ja.chat.sources(message.sources.length)
+              : ja.chat.searchResults(message.sources.length)}
+          </summary>
           <ul>
             {message.sources
               .filter((s) => /^https?:\/\//i.test(s.url))

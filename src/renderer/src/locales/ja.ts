@@ -180,6 +180,7 @@ export const ja = {
     webSearching: (query: string) => `Web を検索しています: ${query}`,
     webSearchUnknown: '（検索語を取得中）',
     sources: (n: number) => `出典（${n} 件）`,
+    searchResults: (n: number) => `検索結果（${n} 件）`,
     retrying: (attempt: number, max: number, seconds: number) =>
       `再試行を待っています（${attempt}/${max} 回目、約 ${seconds} 秒後）`,
     offline: 'オフラインです。接続が回復すると送信できます。',

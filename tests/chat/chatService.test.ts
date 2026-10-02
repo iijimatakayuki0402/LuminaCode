@@ -722,8 +722,8 @@ describe('Web 検索（CHT-11）', () => {
       expect.objectContaining({ type: 'webSearch', query: '東京 天気' })
     )
     expect(m.sources).toEqual([
-      { url: 'https://example.com/a', title: 'A' },
-      { url: 'https://example.com/b', title: 'B' }
+      { url: 'https://example.com/a', title: 'A', cited: true },
+      { url: 'https://example.com/b', title: 'B', cited: true }
     ])
     // 検索の回数は概算コストに含める（1 回 0.01 USD）
     const base = {
@@ -736,6 +736,28 @@ describe('Web 検索（CHT-11）', () => {
       0.02,
       6
     )
+  })
+
+  it('結果を絞り込む版: コード実行は数えず検索語を出し、引用が無ければ検索結果を示す', async () => {
+    webSearch = true
+    setup([
+      {
+        chunks: ['答え'],
+        search: {
+          query: '最新 モデル',
+          filtered: true,
+          results: [
+            { url: 'https://example.com/x', title: 'X' },
+            { url: 'https://example.com/x', title: 'X' }
+          ]
+        }
+      }
+    ])
+    const m = await sendAndWait('Q')
+    expect(events.filter((e) => e.type === 'webSearch')).toEqual([
+      expect.objectContaining({ query: '最新 モデル' })
+    ])
+    expect(m.sources).toEqual([{ url: 'https://example.com/x', title: 'X', cited: false }])
   })
 
   it('pause_turn では、それまでの応答を付けて続きを頼み、1 つの回答にまとめる', async () => {
@@ -755,13 +777,23 @@ describe('Web 検索（CHT-11）', () => {
     expect(m.tokens_used).toBe(240)
   })
 
-  it('オフにした後は、検索を含む以前の回答を本文だけにして送る', async () => {
+  it('オフにした後も以前の検索結果は残し、検索ツールは使わせない（tool_choice: none）', async () => {
     webSearch = true
-    setup([{ chunks: ['A1'], search: { query: 'q' } }, { chunks: ['A2'] }])
+    setup([{ chunks: ['A1'], search: { query: 'q' } }, { chunks: ['A2'] }, { chunks: ['A3'] }])
     await sendAndWait('Q1')
     webSearch = false
     await sendAndWait('Q2')
     const assistant = fake.calls[1].messages.find((x) => x.role === 'assistant')!
-    expect(assistant.content).toEqual([{ type: 'text', text: 'A1' }])
+    expect((assistant.content as { type: string }[]).map((b) => b.type)).toContain(
+      'server_tool_use'
+    )
+    expect(fake.calls[1].tools).toHaveLength(1)
+    expect(fake.calls[1].tool_choice).toEqual({ type: 'none' })
+    // 検索していないスレッドでは、ツールを渡さない
+    const other = ops.createThread(db, { project_id: projectId }).id
+    service.send({ threadId: other, content: 'Q', attachmentIds: [] })
+    await service.whenIdle(other)
+    expect(fake.calls[2]).not.toHaveProperty('tools')
+    expect(fake.calls[2]).not.toHaveProperty('tool_choice')
   })
 })
