@@ -126,6 +126,7 @@
 
 - **2026-10-02**: Lumina Code構築時、peer依存の上限で最新版を採用できなかった。`electron-vite@5` は `vite` ^7 まで、`@vitejs/plugin-react@6` は `vite` ^8 必須、`typescript-eslint` は `typescript` <6.1 が条件。vite 7 / plugin-react 5 / TypeScript 6.0 / ESLint 9（`@eslint/js` も 9 に揃える）で固定した。`npm view <pkg> peerDependencies` で確認してから導入する。
 - **2026-10-02**: `npm approve-scripts` は承認のみで、スクリプトは実行されない。承認後に `npm rebuild <pkg>` が必要。`electron` は `npm rebuild` でもバイナリが取得されず、`node node_modules/electron/install.js` を直接実行する必要があった。`better-sqlite3` は `electron-rebuild -f -w better-sqlite3` で Electron 用に再ビルドする（Node から直接読み込むと ABI 不一致になる）。
+- **2026-10-02（上記の訂正）**: `better-sqlite3` v13 は N-API 版で、同梱の `prebuilds/` のバイナリを最優先で読み込むため、Node（ABI 137）と Electron 44（ABI 149）の両方で再ビルドなしに動作することを確認した。`electron-rebuild` による再ビルドは不要のため、`rebuild` スクリプトと `@electron/rebuild` の直接依存は削除した（`electron-builder` の間接依存としては残る）。Electron ランタイムでの確認は `npm run test:electron` で行う。
 
 ## 11. 環境構築チェックリスト
 
