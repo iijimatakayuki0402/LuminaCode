@@ -38,6 +38,7 @@ type Handler = (args: Record<string, unknown>) => Promise<{ content: { text: str
 export function fakeAgentSdk(scripts: Script[]): FakeAgent {
   const runs: FakeAgent['runs'] = []
   let index = 0
+  let taskSeq = 0
   // 実際の SDK と同じく、再開したセッションの累計は以前の分を含む
   const sessionTotals = new Map<string, { input: number; output: number; cost: number }>()
 
@@ -115,6 +116,11 @@ export function fakeAgentSdk(scripts: Script[]): FakeAgent {
           )
         } else if (call.tool === 'Read') {
           response = readFileSync(resolve(cwd, String(call.input['file_path'])), 'utf-8')
+        } else if (call.tool === 'TaskCreate') {
+          // 実際の SDK と同じ形の結果（TaskCreateOutput）。ID は 1 から順に振る
+          response = { task: { id: String(++taskSeq), subject: call.input['subject'] } }
+        } else if (call.tool === 'TaskUpdate') {
+          response = { success: true, taskId: call.input['taskId'], updatedFields: ['status'] }
         } else if (call.tool.startsWith('mcp__lumina__')) {
           const handler = servers['lumina'].tools.find(
             (t) => `mcp__lumina__${t.name}` === call.tool

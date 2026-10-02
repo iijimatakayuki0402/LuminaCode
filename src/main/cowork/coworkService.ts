@@ -68,6 +68,7 @@ import {
   listToolEventsByThread,
   summarizeToolResponse
 } from './toolEvents'
+import { TASK_TOOLS, TaskTracker } from './tasks'
 import { moveToTrash, sizeOf } from './trash'
 
 const { ValidationError } = ops
@@ -85,7 +86,9 @@ const TOOLS = [
   'Grep',
   'Bash',
   'PowerShell',
+  // COW-13: 作業の一覧（現在の Claude Code は Task 系のツール。以前の版は TodoWrite）
   'TodoWrite',
+  ...TASK_TOOLS,
   'Agent'
 ]
 
@@ -207,6 +210,8 @@ function parseList(raw: string | null): ToolCategory[] {
 export class CoworkService {
   private readonly running = new Map<string, Run>()
   private readonly pending = new Map<string, Pending>()
+  /** COW-13: スレッドごとの作業の一覧（再開したセッションでも続きから更新できるよう、スレッド単位で持つ） */
+  private readonly tasks = new Map<string, TaskTracker>()
   private readonly loadSdk: () => Promise<Pick<AgentSdk, 'query' | 'tool' | 'createSdkMcpServer'>>
 
   constructor(private readonly deps: CoworkServiceDeps) {
@@ -588,6 +593,9 @@ export class CoworkService {
       DISABLE_TELEMETRY: '1',
       DISABLE_ERROR_REPORTING: '1',
       DISABLE_AUTOUPDATER: '1',
+      // 6.6: Cowork は依頼ごとに実行して終わるため、サブエージェントやコマンドをバックグラウンドで動かさない
+      // （バックグラウンドの結果は回答に入らず、実行の終了時に打ち切られる）
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
       CLAUDE_AGENT_SDK_CLIENT_APP: 'lumina-code'
     }
   }
@@ -690,6 +698,12 @@ export class CoworkService {
           summarizeToolResponse(input.tool_name, input.tool_response)
         )
         if (event) emit({ type: 'tool', threadId, messageId: assistantId, event })
+        if (TASK_TOOLS.includes(input.tool_name)) {
+          let tracker = this.tasks.get(threadId)
+          if (!tracker) this.tasks.set(threadId, (tracker = new TaskTracker()))
+          const todos = tracker.apply(input.tool_name, input.tool_input, input.tool_response)
+          if (todos) emit({ type: 'todos', threadId, messageId: assistantId, todos })
+        }
       } else if (input.hook_event_name === 'PostToolUseFailure') {
         const event = finishToolEvent(db, input.tool_use_id, `エラー: ${input.error}`)
         if (event) emit({ type: 'tool', threadId, messageId: assistantId, event })

@@ -522,7 +522,8 @@ dialog.dialog.danger .dialog-head {
 }
 .chat-log {
   flex: 1;
-  min-height: 0;
+  /* todo・変更の一覧・エラー表示が並んでも、会話が読める高さを残す（足りない分は .content がスクロールする） */
+  min-height: 12rem;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -869,6 +870,9 @@ dialog.dialog.danger .dialog-head {
   flex-wrap: wrap;
 }
 .todo-panel {
+  flex-shrink: 0;
+  max-height: 8rem;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius);

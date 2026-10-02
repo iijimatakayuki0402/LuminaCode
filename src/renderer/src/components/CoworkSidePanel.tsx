@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type {
   CoworkProjectSettings,
   FileEntry,
@@ -72,6 +72,20 @@ function FileTree({ projectId }: { projectId: string }): React.JSX.Element {
       active = false
     }
   }, [projectId])
+
+  // Cowork の実行が終わったら、開いているフォルダを読み直す（作成・削除したファイルを反映する）
+  const openRef = useRef(open)
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
+  useEffect(
+    () =>
+      window.lumina.chat.onEvent((event) => {
+        if (event.type !== 'finished') return
+        for (const path of Object.keys(openRef.current)) void load(path)
+      }),
+    [load]
+  )
 
   const toggle = (entry: FileEntry): void => {
     if (entry.isLink) return

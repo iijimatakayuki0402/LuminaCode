@@ -36,6 +36,10 @@ const COMMAND_TOOLS = new Set(['Bash', 'PowerShell'])
 // Skill は信頼済みのスキルの読み込みのみ（スキルが行う操作はそれぞれのツールとして判定される）
 const SAFE_TOOLS = new Set([
   'TodoWrite',
+  'TaskCreate',
+  'TaskUpdate',
+  'TaskList',
+  'TaskGet',
   'Agent',
   'Task',
   'BashOutput',

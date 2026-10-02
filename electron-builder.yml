@@ -19,10 +19,15 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # GitHub はアップロード時にファイル名の空白を「.」に変えるため、latest.yml と食い違わないよう空白を含めない
+  artifactName: ${name}-setup-${version}.${ext}
   # 10.4: アンインストール時にアプリデータを削除するかを選ぶ（build/installer.nsh）
   include: build/installer.nsh
-# CMN-03: 更新の配信元。設定すると、ビルド時に resources\app-update.yml が作られ、更新を確認できるようになる
-# （未設定の間は、アプリは更新を確認しない）。設定例:
-# publish:
-#   provider: generic
-#   url: https://example.com/lumina-code/
+# CMN-03: 更新の配信元（GitHub Releases の公開リポジトリ。リリース専用で、ソースは置かない）
+# ビルド時に resources\app-update.yml が作られ、アプリは公開済みのリリースの latest.yml を確認する。
+# 公開リポジトリのため、アプリにトークンは持たせない
+publish:
+  provider: github
+  owner: iijimatakayuki0402
+  repo: CChatProject
+  releaseType: release

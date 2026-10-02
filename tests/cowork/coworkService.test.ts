@@ -104,7 +104,8 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
       CLAUDE_CONFIG_DIR: join(base, 'agent'),
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       DISABLE_TELEMETRY: '1',
-      DISABLE_ERROR_REPORTING: '1'
+      DISABLE_ERROR_REPORTING: '1',
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
     })
     expect(options.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN')
     expect(options.env).not.toHaveProperty('AWS_PROFILE')
@@ -160,6 +161,41 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
       { type: 'todos', threadId, messageId: id, todos }
     ])
     expect(fake.runs[0].options.tools).toContain('TodoWrite')
+  })
+
+  it('Task 系のツールの結果から todo の一覧を作り、確認なしで実行する（COW-13）', async () => {
+    setup([
+      {
+        calls: [
+          {
+            tool: 'TaskCreate',
+            input: { subject: '調べる', description: 'd', activeForm: '調べています' }
+          },
+          { tool: 'TaskCreate', input: { subject: '直す', description: 'd' } },
+          { tool: 'TaskUpdate', input: { taskId: '1', status: 'completed' } },
+          { tool: 'TaskUpdate', input: { taskId: '2', status: 'in_progress' } }
+        ],
+        text: 'done'
+      }
+    ])
+    await send()
+    expect(fake.runs[0].options.tools).toEqual(
+      expect.arrayContaining(['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'])
+    )
+    expect(decisions()).toEqual([
+      'TaskCreate:allow',
+      'TaskCreate:allow',
+      'TaskUpdate:allow',
+      'TaskUpdate:allow'
+    ])
+    expect(permissions()).toEqual([])
+    const last = events.filter((e) => e.type === 'todos').at(-1)
+    expect(last).toMatchObject({
+      todos: [
+        { content: '調べる', status: 'completed', activeForm: '調べています' },
+        { content: '直す', status: 'in_progress', activeForm: '直す' }
+      ]
+    })
   })
 
   it('完了した内容と使用量を記録する', async () => {
