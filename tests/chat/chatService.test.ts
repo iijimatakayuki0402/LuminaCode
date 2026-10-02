@@ -540,6 +540,27 @@ describe('思考量・共通の指示・要約・タイトル（Phase 2）', () 
     expect(fake.calls[1]).not.toHaveProperty('output_config')
   })
 
+  it('新しいスレッドの拡張思考は既定でオン（CHT-07）', () => {
+    expect(ops.getThread(db, threadId)!.extended_thinking).toBe(true)
+    const off = ops.createThread(db, { project_id: projectId, extended_thinking: false })
+    expect(off.extended_thinking).toBe(false)
+  })
+
+  it('拡張思考をオフにすると thinking を指定せず、以前の思考ブロックも送らない（CHT-07）', async () => {
+    setup([{ chunks: ['A1'], thinking: '考えた' }, { chunks: ['A2'] }])
+    await sendAndWait('Q1')
+    const stored = ops.getMessage(db, path()[1].id)!.content_blocks
+    const blocks = JSON.parse(stored ?? '[]') as { type: string }[]
+    expect(blocks.map((b) => b.type)).toContain('thinking')
+
+    ops.updateThread(db, threadId, { extended_thinking: false })
+    await sendAndWait('Q2')
+    expect(fake.calls[1]).not.toHaveProperty('thinking')
+    expect(fake.calls[1]).not.toHaveProperty('betas')
+    const assistant = fake.calls[1].messages.find((m) => m.role === 'assistant')!
+    expect((assistant.content as { type: string }[]).map((b) => b.type)).toEqual(['text'])
+  })
+
   it('共通のカスタム指示 → プロジェクトの順に結合する（PRJ-08）', async () => {
     const service2 = new ChatService({
       db,

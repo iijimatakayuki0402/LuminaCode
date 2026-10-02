@@ -41,6 +41,7 @@ import {
 } from '../cowork/extensions'
 import type { McpStore } from '../cowork/mcpStore'
 import { deleteToolEventsBefore, formatToolEvents, searchToolEvents } from '../cowork/toolEvents'
+import { clearAppLog } from '../logging/appLog'
 import type { AttachmentInfo, LicenseList, StageResult } from '@shared/types'
 import type { UpdateService } from '../update/updateService'
 import { NotFoundError } from './errors'
@@ -400,6 +401,10 @@ export function createHandlers({
       )
     },
     'logs:deleteBefore': (before) => deleteToolEventsBefore(db, v.num(before, 'before')),
+    'logs:clearAppLog': () => {
+      clearAppLog(appInfo.logPath)
+      console.info('[app] app log cleared')
+    },
 
     'attachments:select': async () =>
       stageAll((await selectFiles()).map((p) => () => attachments.stageFromPath(p))),

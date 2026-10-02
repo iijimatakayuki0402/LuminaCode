@@ -22,6 +22,8 @@ interface BundleThread {
   title: string | null
   model: string | null
   effort: string | null
+  /** 0／1。この項目が無い古いファイルはオンとして読み込む */
+  extended_thinking?: number
   context_summary: string | null
   title_source: string
   active_leaf_id: string | null
@@ -76,7 +78,7 @@ export function exportProject(
   void _id
   const threads = db
     .prepare(
-      `SELECT id, title, model, effort, context_summary, title_source, active_leaf_id, created_at, updated_at
+      `SELECT id, title, model, effort, extended_thinking, context_summary, title_source, active_leaf_id, created_at, updated_at
        FROM threads WHERE project_id = ? ORDER BY created_at, rowid`
     )
     .all(projectId) as BundleThread[]
@@ -243,7 +245,7 @@ export function importBundle(
     const insertThread = db.prepare(
       `INSERT INTO threads (id, project_id, title, model, effort, context_summary, title_source,
          extended_thinking, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'manual', 0, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?)`
     )
     for (const t of bundle.threads) {
       insertThread.run(
@@ -253,6 +255,7 @@ export function importBundle(
         t.model ?? null,
         t.effort && EFFORTS.has(t.effort) ? t.effort : null,
         t.context_summary ?? null,
+        t.extended_thinking === 0 ? 0 : 1,
         num(t.created_at) ? t.created_at : Date.now(),
         num(t.updated_at) ? t.updated_at : Date.now()
       )

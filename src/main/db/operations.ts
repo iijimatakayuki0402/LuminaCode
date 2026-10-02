@@ -311,7 +311,8 @@ export function createThread(db: Database.Database, input: CreateThreadInput): T
     input.project_id,
     input.title ?? null,
     input.model ?? null,
-    input.extended_thinking ? 1 : 0,
+    // CHT-07: 既定はオン
+    input.extended_thinking === false ? 0 : 1,
     now,
     now
   )

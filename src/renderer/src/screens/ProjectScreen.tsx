@@ -121,6 +121,15 @@ export function ProjectScreen({
     }
   }
 
+  const changeThinking = async (thread: Thread, on: boolean): Promise<void> => {
+    try {
+      await unwrap(window.lumina.threads.update(thread.id, { extended_thinking: on }))
+      await reload()
+    } catch (e) {
+      fail(e)
+    }
+  }
+
   const changeEffort = async (thread: Thread, effort: EffortLevel | ''): Promise<void> => {
     try {
       await unwrap(window.lumina.threads.update(thread.id, { effort }))
@@ -390,6 +399,17 @@ export function ProjectScreen({
                 >
                   {ja.exchange.exportMarkdown}
                 </button>
+                {/* CHT-07: 拡張思考のオン／オフ（モデルが対応している場合） */}
+                {activeModelInfo?.supports_adaptive_thinking && (
+                  <label className="check" title={ja.project.thinkingNote}>
+                    <input
+                      type="checkbox"
+                      checked={selected.extended_thinking}
+                      onChange={(e) => void changeThinking(selected, e.target.checked)}
+                    />
+                    {ja.project.thinking}
+                  </label>
+                )}
                 {/* CHT-07: 思考量（モデルが対応している段階だけを選べる） */}
                 {effortLevels.length > 0 && (
                   <div className="field">

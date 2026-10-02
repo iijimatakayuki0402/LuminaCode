@@ -147,3 +147,25 @@ describe('集計（USG-02）', () => {
     expect(new Date(to).getFullYear()).toBe(2027)
   })
 })
+
+describe('コンテキスト使用量（CTX-01）', () => {
+  it('スレッドの直近の応答で使ったトークン数（キャッシュと出力を含む）とモデルを返す', () => {
+    const thread = ops.createThread(db, { project_id: projectA }).id
+    const other = ops.createThread(db, { project_id: projectA }).id
+    const insert = db.prepare(
+      `INSERT INTO usage_records (id, project_id, project_name, thread_id, message_id, model,
+         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, estimated_cost, created_at)
+       VALUES (?, ?, 'A', ?, ?, ?, ?, ?, ?, ?, 0, ?)`
+    )
+    const message = (threadId: string): string =>
+      ops.createMessage(db, { thread_id: threadId, role: 'assistant', content: 'a' }).id
+    expect(usage.contextOf(thread)).toEqual({ tokens: 0, model: null })
+
+    insert.run('u1', projectA, thread, message(thread), 'old', 100, 10, 0, 0, NOW - 2)
+    insert.run('u2', projectA, thread, message(thread), 'new', 50, 20, 300, 40, NOW - 1)
+    // 要約・タイトル生成など、応答に結び付かない記録は数えない
+    insert.run('u3', projectA, thread, null, 'title', 9999, 1, 0, 0, NOW)
+    insert.run('u4', projectA, other, message(other), 'x', 5000, 1, 0, 0, NOW)
+    expect(usage.contextOf(thread)).toEqual({ tokens: 50 + 20 + 300 + 40, model: 'new' })
+  })
+})

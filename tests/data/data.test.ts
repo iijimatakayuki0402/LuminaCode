@@ -132,6 +132,19 @@ describe('書き出し・読み込み（EXP-01、EXP-04、EXP-05）', () => {
     expect(attachments.read(file).toString()).toBe('しおり')
   })
 
+  it('拡張思考の設定を保ち、項目が無い古いファイルはオンとして読み込む（CHT-07）', () => {
+    const { projectId } = seed()
+    const [thread] = ops.listThreadsByProject(db, projectId)
+    ops.updateThread(db, thread.id, { extended_thinking: false })
+    const bundle = exportProject(db, attachments, projectId)
+    const off = importBundle(db, attachments, bundle, null)
+    expect(ops.listThreadsByProject(db, off.id)[0].extended_thinking).toBe(false)
+
+    delete bundle.threads[0].extended_thinking
+    const old = importBundle(db, attachments, bundle, null)
+    expect(ops.listThreadsByProject(db, old.id)[0].extended_thinking).toBe(true)
+  })
+
   it('Cowork は作業フォルダを再指定しないと読み込めない', () => {
     const project = ops.createProject(db, { type: 'cowork', name: 'C', work_folder: dir })
     const bundle = exportProject(db, attachments, project.id)

@@ -189,6 +189,8 @@ export interface IpcContract {
   /** 保存先を選んで書き出す（キャンセル時は null） */
   'logs:export': { args: [filter: ToolEventFilter, format: 'csv' | 'json']; result: string | null }
   'logs:deleteBefore': { args: [before: number]; result: number }
+  /** アプリログを削除する（6.12） */
+  'logs:clearAppLog': { args: []; result: void }
 
   /** ファイル選択ダイアログで選び、仮置きする */
   'attachments:select': { args: []; result: StageResult }
@@ -353,6 +355,7 @@ export interface LuminaApi {
     search: Invoke<'logs:search'>
     export: Invoke<'logs:export'>
     deleteBefore: Invoke<'logs:deleteBefore'>
+    clearAppLog: Invoke<'logs:clearAppLog'>
   }
   attachments: {
     select: Invoke<'attachments:select'>

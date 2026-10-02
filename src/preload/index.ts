@@ -141,7 +141,8 @@ const api: LuminaApi = {
   logs: {
     search: invoke('logs:search'),
     export: invoke('logs:export'),
-    deleteBefore: invoke('logs:deleteBefore')
+    deleteBefore: invoke('logs:deleteBefore'),
+    clearAppLog: invoke('logs:clearAppLog')
   },
   attachments: {
     select: invoke('attachments:select'),

@@ -17,6 +17,8 @@ export interface ScriptedCall {
 export interface Script {
   calls?: ScriptedCall[]
   text?: string
+  /** TodoWrite を呼んだ応答を返す（todo のパネル。COW-13） */
+  todos?: { content: string; status: string; activeForm: string }[]
   /** ツール呼び出しの後、停止されるまで待つ */
   hang?: boolean
   result?: 'success' | 'error_during_execution'
@@ -63,6 +65,18 @@ export function fakeAgentSdk(scripts: Script[]): FakeAgent {
 
     async function* messages(): AsyncGenerator<unknown> {
       yield { type: 'system', subtype: 'init', session_id: `session-${index}` }
+      if (script.todos) {
+        yield {
+          type: 'assistant',
+          uuid: `uuid-todo-${index}`,
+          parent_tool_use_id: null,
+          message: {
+            content: [
+              { type: 'tool_use', id: 'tu-todo', name: 'TodoWrite', input: { todos: script.todos } }
+            ]
+          }
+        }
+      }
       let n = 0
       for (const call of script.calls ?? []) {
         const toolUseId = `tu-${index}-${n++}`

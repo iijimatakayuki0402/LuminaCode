@@ -150,6 +150,7 @@ export default function App(): React.JSX.Element {
           onStatusChange={updateStatus}
           appearance={appearance}
           onAppearanceChange={setAppearance}
+          onOpenLogs={() => setScreen({ name: 'logs' })}
         />
       )}
       {screen.name === 'logs' && <OperationLogScreen />}

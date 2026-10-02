@@ -27,10 +27,13 @@ export function SettingsScreen({
   status,
   onStatusChange,
   appearance,
-  onAppearanceChange
+  onAppearanceChange,
+  onOpenLogs
 }: {
   /** 開いたときに表示する位置 */
   section?: 'about'
+  /** 操作ログの画面を開く（期間を指定して削除する） */
+  onOpenLogs: () => void
   update: UpdateStatus | null
   status: ApiKeyStatus
   onStatusChange: (status: ApiKeyStatus) => void
@@ -52,7 +55,7 @@ export function SettingsScreen({
       <ShortcutsSection />
       <CoworkPrefsSection />
       <UsageLimitsSection />
-      <DataSection />
+      <DataSection onOpenLogs={onOpenLogs} />
       <BackupSection />
       <AboutSection update={update} />
     </main>
@@ -387,10 +390,23 @@ function UsageLimitsSection(): React.JSX.Element {
 }
 
 /**
- * データ（6.12: データ保存先の表示）
+ * データ（6.12: データ保存先の表示、ログの削除）
  */
-function DataSection(): React.JSX.Element {
+function DataSection({ onOpenLogs }: { onOpenLogs: () => void }): React.JSX.Element {
   const [info, setInfo] = useState<AppInfo | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [message, setMessage] = useState<MessageState | null>(null)
+
+  const clearAppLog = async (): Promise<void> => {
+    setConfirmClear(false)
+    try {
+      await unwrap(window.lumina.logs.clearAppLog())
+      setMessage({ tone: 'info', text: ja.data.appLogCleared })
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
+
   useEffect(() => {
     let active = true
     unwrap(window.lumina.app.getInfo())
@@ -409,6 +425,26 @@ function DataSection(): React.JSX.Element {
           <br />
           {ja.data.logPath(info.logPath)}
         </p>
+      )}
+      <div className="row">
+        <button className="btn" type="button" onClick={onOpenLogs}>
+          {ja.data.openOperationLog}
+        </button>
+        <button className="btn btn-danger" type="button" onClick={() => setConfirmClear(true)}>
+          {ja.data.clearAppLog}
+        </button>
+      </div>
+      <p className="hint">{ja.data.logNote}</p>
+      <Message message={message} />
+      {confirmClear && (
+        <ConfirmDialog
+          title={ja.data.clearAppLog}
+          message={ja.data.clearAppLogConfirm}
+          confirmLabel={ja.data.clearAppLogButton}
+          danger
+          onConfirm={() => void clearAppLog()}
+          onCancel={() => setConfirmClear(false)}
+        />
       )}
     </section>
   )

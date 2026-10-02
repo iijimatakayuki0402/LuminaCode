@@ -75,6 +75,10 @@ describe('openDatabase', () => {
       content: 'hi',
       status: 'complete'
     })
+    // v8: 思考は以前から常にオンだったため、既存のスレッドはオンにする（CHT-07）
+    expect(db.prepare('SELECT extended_thinking FROM threads').get()).toEqual({
+      extended_thinking: 1
+    })
     db.close()
   })
 })

@@ -130,6 +130,38 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
     expect(append).toContain(DELETE_TOOL)
   })
 
+  it('拡張思考をオフにしたスレッドでは思考を無効にする（CHT-07）', async () => {
+    const model = {
+      id: 'claude-sonnet-test',
+      display_name: 'S',
+      created_at: '2026-01-01',
+      max_input_tokens: 1e6,
+      max_tokens: 128000,
+      supports_adaptive_thinking: true,
+      effort_levels: ['low']
+    }
+    ops.setSetting(db, 'models_cache', JSON.stringify({ fetched_at: Date.now(), models: [model] }))
+    await send()
+    expect(fake.runs[0].options).not.toHaveProperty('thinking')
+
+    ops.updateThread(db, threadId, { extended_thinking: false })
+    await send()
+    expect(fake.runs[1].options.thinking).toEqual({ type: 'disabled' })
+  })
+
+  it('TodoWrite の内容を todo のパネルに送る（COW-13）', async () => {
+    const todos = [
+      { content: '調べる', status: 'completed', activeForm: '調べています' },
+      { content: '直す', status: 'in_progress', activeForm: '直しています' }
+    ]
+    setup([{ todos, text: 'done' }])
+    const id = await send()
+    expect(events.filter((e) => e.type === 'todos')).toEqual([
+      { type: 'todos', threadId, messageId: id, todos }
+    ])
+    expect(fake.runs[0].options.tools).toContain('TodoWrite')
+  })
+
   it('完了した内容と使用量を記録する', async () => {
     const id = await send()
     expect(ops.getMessage(db, id)).toMatchObject({

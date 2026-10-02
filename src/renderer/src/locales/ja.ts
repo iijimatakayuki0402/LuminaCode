@@ -130,6 +130,9 @@ export const ja = {
     modelSource: { thread: 'スレッド', project: 'プロジェクト', default: '全体の既定' },
     noModel: '未選択（設定画面でモデル一覧を更新してください）',
     threadModel: 'このスレッドのモデル',
+    thinking: '拡張思考',
+    thinkingNote:
+      'オンにすると、回答の前に考える過程（要約）を表示します。オフにすると速く安くなりますが、複雑な質問では回答の質が下がることがあります。',
     effort: '思考量',
     effortDefault: 'モデルの既定',
     effortLevels: { low: '少', medium: '中', high: '多', xhigh: 'とても多い', max: '最大' },
@@ -351,7 +354,15 @@ export const ja = {
   data: {
     section: 'データ',
     dataPath: (path: string) => `データ保存先: ${path}`,
-    logPath: (path: string) => `アプリログ: ${path}`
+    logPath: (path: string) => `アプリログ: ${path}`,
+    openOperationLog: '操作ログを開く',
+    clearAppLog: 'アプリログを削除',
+    clearAppLogConfirm:
+      'アプリログ（古い世代を含む）を削除します。問題が起きたときの調査に使う記録も消えます。よろしいですか？',
+    clearAppLogButton: '削除する',
+    appLogCleared: 'アプリログを削除しました。',
+    logNote:
+      '操作ログ（Cowork のツール実行の記録）は、操作ログの画面で期間を指定して削除できます。アプリログには会話の内容や API キーは含まれません。'
   },
   instructions: {
     section: '共通のカスタム指示',

@@ -195,7 +195,8 @@ describe('Thread操作', () => {
     expect(thread.id).toBeTruthy()
     expect(thread.project_id).toBe(projectId)
     expect(thread.title).toBe('テストスレッド')
-    expect(thread.extended_thinking).toBe(false)
+    // CHT-07: 拡張思考の既定はオン
+    expect(thread.extended_thinking).toBe(true)
   })
 
   it('スレッドを取得できる', () => {

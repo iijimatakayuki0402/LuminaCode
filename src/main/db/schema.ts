@@ -301,6 +301,12 @@ export const MIGRATIONS: Migration[] = [
     // Cowork のサブエージェント（6.6: 進捗を入れ子で表示する）
     version: 7,
     statements: ['ALTER TABLE tool_events ADD COLUMN agent_id TEXT']
+  },
+  {
+    // CHT-07: 拡張思考のオン／オフ（threads.extended_thinking）。これまで列は使っておらず、
+    // 思考は常にオンだったため、既存のスレッドはオンにする（新しいスレッドの既定もオン）
+    version: 8,
+    statements: ['UPDATE threads SET extended_thinking = 1']
   }
 ]
 

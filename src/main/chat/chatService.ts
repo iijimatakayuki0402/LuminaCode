@@ -333,7 +333,11 @@ export class ChatService {
     return this.getPublic(assistant.id)
   }
 
-  private buildMessages(threadId: string, assistantId: string): Anthropic.Beta.BetaMessageParam[] {
+  private buildMessages(
+    threadId: string,
+    assistantId: string,
+    thinking: boolean
+  ): Anthropic.Beta.BetaMessageParam[] {
     const path = this.path(threadId).filter((m) => m.id !== assistantId)
     const attachments = new Map<string, ops.AttachmentRecord[]>()
     for (const a of ops.listAttachmentsByThread(this.deps.db, threadId)) {
@@ -349,9 +353,13 @@ export class ChatService {
         if (m.content.trim() !== '') blocks.push({ type: 'text', text: m.content })
         messages.push({ role: 'user', content: blocks })
       } else if (m.status === 'complete' && m.content_blocks) {
+        const blocks = JSON.parse(m.content_blocks) as Anthropic.Beta.BetaContentBlockParam[]
         messages.push({
           role: 'assistant',
-          content: JSON.parse(m.content_blocks) as Anthropic.Beta.BetaContentBlockParam[]
+          // CHT-07: 思考をオフにした場合は、以前の思考ブロックを送り返さない
+          content: thinking
+            ? blocks
+            : blocks.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking')
         })
       } else if (m.content.trim() !== '') {
         messages.push({ role: 'assistant', content: [{ type: 'text', text: m.content }] })
@@ -369,8 +377,10 @@ export class ChatService {
   ): Promise<void> {
     const { emit } = this.deps
     const info = this.deps.modelService.getModelInfo(model)
-    const adaptive = info?.supports_adaptive_thinking ?? false
     const thread = ops.getThread(this.deps.db, threadId)
+    // CHT-07: 拡張思考（モデルが対応していて、スレッドでオフにしていない場合）
+    const adaptive =
+      (info?.supports_adaptive_thinking ?? false) && thread?.extended_thinking !== false
     // CHT-07: 思考量（モデルが対応している場合のみ指定する）
     const effort =
       thread?.effort && info?.effort_levels.includes(thread.effort) ? thread.effort : null
@@ -383,7 +393,7 @@ export class ChatService {
     const params: Anthropic.Beta.MessageCreateParamsStreaming = {
       model,
       max_tokens: Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS),
-      messages: this.buildMessages(threadId, assistantId),
+      messages: this.buildMessages(threadId, assistantId, adaptive),
       stream: true,
       // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
       cache_control: { type: 'ephemeral' },
@@ -581,7 +591,8 @@ export class ChatService {
     const apiKey = this.deps.getApiKey()!
     const client = this.deps.createClient(apiKey)
     const info = this.deps.modelService.getModelInfo(model)
-    const messages = this.buildMessages(threadId, '')
+    const thinking = (info?.supports_adaptive_thinking ?? false) && thread.extended_thinking
+    const messages = this.buildMessages(threadId, '', thinking)
     messages.push({
       role: 'user',
       content: [
@@ -604,7 +615,7 @@ export class ChatService {
           max_tokens: Math.min(16_000, info?.max_tokens ?? 16_000),
           messages,
           ...(system ? { system } : {}),
-          ...(info?.supports_adaptive_thinking
+          ...(thinking
             ? {
                 thinking: {
                   type: 'adaptive' as const,

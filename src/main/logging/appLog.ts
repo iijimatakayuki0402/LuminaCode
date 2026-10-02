@@ -42,6 +42,14 @@ export function writeLog(file: string, level: string, args: unknown[]): void {
 }
 
 /**
+ * アプリログを削除する（6.12。交代した古い世代も含む）。次の書き込みで新しいファイルを作る
+ */
+export function clearAppLog(file: string): void {
+  rmSync(file, { force: true })
+  for (let i = 1; i <= LOG_GENERATIONS; i++) rmSync(`${file}.${i}`, { force: true })
+}
+
+/**
  * console.info / console.warn / console.error をログファイルにも書き出す。戻り値はログファイルのパス
  */
 export function installAppLog(dir: string): string {
