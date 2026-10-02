@@ -613,3 +613,16 @@ export interface SnippetInput {
   name: string
   content: string
 }
+
+/** プロジェクトのテンプレート（PRJ-09）。作業フォルダは含めない */
+export interface ProjectTemplate {
+  id: string
+  name: string
+  type: ProjectType
+  custom_instructions: string | null
+  model: string | null
+  /** Cowork のみ */
+  permission_mode: PermissionMode | null
+  /** Web 検索・取得（Cowork は 6.6、通常チャットは CHT-11） */
+  web_access: boolean
+}

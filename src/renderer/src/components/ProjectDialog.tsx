@@ -1,5 +1,5 @@
-import { useId, useState } from 'react'
-import type { PermissionMode, Project, ProjectType } from '@shared/types'
+import { useEffect, useId, useState } from 'react'
+import type { PermissionMode, Project, ProjectTemplate, ProjectType } from '@shared/types'
 import { unwrap } from '../lib/ipc'
 import { useModels } from '../lib/useModels'
 import { ja } from '../locales/ja'
@@ -35,7 +35,8 @@ export function ProjectDialog({
     instructions: useId(),
     folder: useId(),
     model: useId(),
-    perm: useId()
+    perm: useId(),
+    template: useId()
   }
   const source = mode.kind === 'create' ? null : mode.project
   const { models, defaultModel } = useModels()
@@ -55,6 +56,42 @@ export function ProjectDialog({
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<MessageState | null>(null)
   const [confirmFolder, setConfirmFolder] = useState(false)
+  // PRJ-09: 新規作成ではテンプレートを選べる
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([])
+  const [templateId, setTemplateId] = useState('')
+  const [deletingTemplate, setDeletingTemplate] = useState<ProjectTemplate | null>(null)
+  const template = templates.find((t) => t.id === templateId) ?? null
+
+  useEffect(() => {
+    if (mode.kind !== 'create') return
+    let active = true
+    unwrap(window.lumina.templates.list())
+      .then((list) => active && setTemplates(list))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [mode.kind])
+
+  const applyTemplate = (id: string): void => {
+    setTemplateId(id)
+    const t = templates.find((x) => x.id === id)
+    if (!t) return
+    setType(t.type)
+    setInstructions(t.custom_instructions ?? '')
+    setModel(t.model ?? '')
+    setPermissionMode(t.permission_mode ?? 'confirm_each')
+  }
+
+  const removeTemplate = async (t: ProjectTemplate): Promise<void> => {
+    setDeletingTemplate(null)
+    try {
+      setTemplates(await unwrap(window.lumina.templates.delete(t.id)))
+      setTemplateId('')
+    } catch (error) {
+      setMessage({ tone: 'error', text: (error as Error).message })
+    }
+  }
 
   const isEdit = mode.kind === 'edit'
   const isCowork = type === 'cowork'
@@ -90,6 +127,10 @@ export function ProjectDialog({
       const project = isEdit
         ? await unwrap(window.lumina.projects.update(mode.project.id, common))
         : await unwrap(window.lumina.projects.create({ type, ...common }))
+      // PRJ-09: テンプレートの Web の設定を引き継ぐ
+      if (template?.web_access) {
+        await unwrap(window.lumina.cowork.setSettings(project.id, { webAccess: true }))
+      }
       onDone(project)
     } catch (error) {
       setMessage({ tone: 'error', text: (error as Error).message })
@@ -137,6 +178,38 @@ export function ProjectDialog({
         }
       >
         <form id="project-form" onSubmit={submit}>
+          {mode.kind === 'create' && templates.length > 0 && (
+            <div className="field">
+              <label htmlFor={ids.template}>{ja.templates.select}</label>
+              <div className="row">
+                <select
+                  id={ids.template}
+                  className="select"
+                  style={{ flex: 1 }}
+                  value={templateId}
+                  onChange={(e) => applyTemplate(e.target.value)}
+                  disabled={busy}
+                >
+                  <option value="">{ja.templates.none}</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}（{ja.projectType[t.type]}）
+                    </option>
+                  ))}
+                </select>
+                {template && (
+                  <button
+                    className="btn btn-sm btn-danger"
+                    type="button"
+                    onClick={() => setDeletingTemplate(template)}
+                    disabled={busy}
+                  >
+                    {ja.templates.delete}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <fieldset className="field" style={{ border: 'none', padding: 0, margin: '0 0 0.9rem' }}>
             <legend className="hint" style={{ marginBottom: '0.35rem' }}>
               {ja.projectDialog.type}
@@ -253,6 +326,17 @@ export function ProjectDialog({
           <Message message={message} />
         </form>
       </Dialog>
+
+      {deletingTemplate && (
+        <ConfirmDialog
+          title={ja.templates.delete}
+          message={ja.templates.deleteConfirm(deletingTemplate.name)}
+          confirmLabel={ja.common.delete}
+          danger
+          onConfirm={() => void removeTemplate(deletingTemplate)}
+          onCancel={() => setDeletingTemplate(null)}
+        />
+      )}
 
       {confirmFolder && isEdit && (
         <ConfirmDialog

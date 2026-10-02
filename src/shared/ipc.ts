@@ -50,6 +50,7 @@ import type {
   UsageTotals,
   UpdateProjectInput,
   UpdateThreadInput,
+  ProjectTemplate,
   Snippet,
   SnippetInput
 } from './types'
@@ -134,6 +135,13 @@ export interface IpcContract {
   'snippets:list': { args: []; result: Snippet[] }
   'snippets:save': { args: [input: SnippetInput]; result: Snippet[] }
   'snippets:delete': { args: [id: string]; result: Snippet[] }
+  /** プロジェクトのテンプレート（PRJ-09）。保存・削除は更新後の一覧を返す */
+  'templates:list': { args: []; result: ProjectTemplate[] }
+  'templates:saveFromProject': {
+    args: [projectId: string, name: string]
+    result: ProjectTemplate[]
+  }
+  'templates:delete': { args: [id: string]; result: ProjectTemplate[] }
 
   /** Cowork: 確認ダイアログへの回答 */
   'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
@@ -316,6 +324,11 @@ export interface LuminaApi {
     list: Invoke<'snippets:list'>
     save: Invoke<'snippets:save'>
     delete: Invoke<'snippets:delete'>
+  }
+  templates: {
+    list: Invoke<'templates:list'>
+    saveFromProject: Invoke<'templates:saveFromProject'>
+    delete: Invoke<'templates:delete'>
   }
   chat: {
     send: Invoke<'chat:send'>

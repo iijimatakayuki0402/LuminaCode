@@ -88,6 +88,11 @@ const api: LuminaApi = {
     save: invoke('snippets:save'),
     delete: invoke('snippets:delete')
   },
+  templates: {
+    list: invoke('templates:list'),
+    saveFromProject: invoke('templates:saveFromProject'),
+    delete: invoke('templates:delete')
+  },
   chat: {
     send: invoke('chat:send'),
     regenerate: invoke('chat:regenerate'),

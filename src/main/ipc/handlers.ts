@@ -15,6 +15,7 @@ import { getAppearance, setAppearance } from '../settings/appearance'
 import { getChatPrefs, setChatPrefs } from '../settings/chatPrefs'
 import { getGlobalInstructions, setGlobalInstructions } from '../settings/instructions'
 import { deleteSnippet, listSnippets, saveSnippet } from '../settings/snippets'
+import { deleteTemplate, listTemplates, saveTemplateFromProject } from '../settings/templates'
 import { leafFrom } from '@shared/conversation'
 import type { AttachmentStore } from '../chat/attachments'
 import type { ChatService } from '../chat/chatService'
@@ -285,6 +286,10 @@ export function createHandlers({
     'snippets:list': () => listSnippets(db),
     'snippets:save': (input) => saveSnippet(db, v.snippetInput(input, 'input')),
     'snippets:delete': (id) => deleteSnippet(db, v.id(id, 'id')),
+    'templates:list': () => listTemplates(db),
+    'templates:saveFromProject': (projectId, name) =>
+      saveTemplateFromProject(db, v.id(projectId, 'projectId'), v.str(name, 'name')),
+    'templates:delete': (id) => deleteTemplate(db, v.id(id, 'id')),
     'chat:stop': (threadId) => {
       const checked = v.id(threadId, 'threadId')
       engineForThread(checked).stop(checked)
@@ -339,14 +344,15 @@ export function createHandlers({
       workFolderOf(id)
       return mcp.remove(id, v.str(name, 'name'))
     },
+    // Web の設定は Cowork（6.6）と通常チャット（CHT-11）の両方で使う
     'cowork:getSettings': (projectId) => {
       const id = v.id(projectId, 'projectId')
-      workFolderOf(id)
+      found(ops.getProject(db, id), PROJECT_NOT_FOUND)
       return getCoworkSettings(db, id)
     },
     'cowork:setSettings': (projectId, input) => {
       const id = v.id(projectId, 'projectId')
-      workFolderOf(id)
+      found(ops.getProject(db, id), PROJECT_NOT_FOUND)
       return setCoworkSettings(db, id, v.coworkSettingsInput(input, 'input'))
     },
     'cowork:getPrefs': () => coworkService.getPrefs(),

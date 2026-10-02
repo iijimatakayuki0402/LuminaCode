@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ImportPreview, Project, ProjectType } from '@shared/types'
-import { ConfirmDialog } from '../components/Dialog'
+import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
 import { ImportDialog } from '../components/ImportDialog'
 import { ProjectDialog, type ProjectDialogMode } from '../components/ProjectDialog'
@@ -39,6 +39,20 @@ export function DashboardScreen({
   const [deleting, setDeleting] = useState<Project | null>(null)
   const [message, setMessage] = useState<MessageState | null>(null)
   const [importing, setImporting] = useState<ImportPreview | null>(null)
+  // PRJ-09: テンプレートとして保存するプロジェクトと、テンプレートの名前
+  const [templating, setTemplating] = useState<{ project: Project; name: string } | null>(null)
+
+  const saveTemplate = async (): Promise<void> => {
+    if (!templating) return
+    try {
+      await unwrap(window.lumina.templates.saveFromProject(templating.project.id, templating.name))
+      setMessage({ tone: 'info', text: ja.templates.saved(templating.name.trim()) })
+      setTemplating(null)
+    } catch (e) {
+      setMessage({ tone: 'error', text: (e as Error).message })
+      setTemplating(null)
+    }
+  }
 
   // EXP-01: 読み込むファイルを選び、内容を確認してから読み込む
   const startImport = async (): Promise<void> => {
@@ -219,6 +233,14 @@ export function DashboardScreen({
                 <button
                   className="btn btn-sm"
                   type="button"
+                  title={ja.templates.saveNote}
+                  onClick={() => setTemplating({ project: p, name: p.name })}
+                >
+                  {ja.templates.saveButton}
+                </button>
+                <button
+                  className="btn btn-sm"
+                  type="button"
                   onClick={() =>
                     void run(() =>
                       unwrap(window.lumina.projects.update(p.id, { pinned: !p.pinned }))
@@ -249,6 +271,41 @@ export function DashboardScreen({
             </li>
           ))}
         </ul>
+      )}
+
+      {templating && (
+        <Dialog
+          title={ja.templates.saveTitle}
+          onClose={() => setTemplating(null)}
+          footer={
+            <>
+              <button className="btn" type="button" onClick={() => setTemplating(null)}>
+                {ja.common.cancel}
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={templating.name.trim() === ''}
+                onClick={() => void saveTemplate()}
+              >
+                {ja.common.save}
+              </button>
+            </>
+          }
+        >
+          <p className="hint">{ja.templates.saveNote}</p>
+          <div className="field">
+            <label htmlFor="template-name">{ja.templates.name}</label>
+            <input
+              id="template-name"
+              className="input"
+              autoFocus
+              maxLength={100}
+              value={templating.name}
+              onChange={(e) => setTemplating({ ...templating, name: e.target.value })}
+            />
+          </div>
+        </Dialog>
       )}
 
       {dialog && (
