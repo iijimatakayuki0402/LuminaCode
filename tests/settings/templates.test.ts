@@ -20,7 +20,7 @@ describe('プロジェクトのテンプレート（PRJ-09）', () => {
     const p = ops.createProject(db, {
       type: 'cowork',
       name: 'レビュー',
-      work_folder: 'C:\work',
+      work_folder: String.raw`C:\work`,
       custom_instructions: '厳しめに',
       model: 'claude-x',
       permission_mode: 'plan_only'

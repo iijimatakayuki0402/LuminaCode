@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk'
 import type Database from 'better-sqlite3'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,6 +12,22 @@ import { createInMemoryDatabase } from '../../src/main/db/init'
 import * as ops from '../../src/main/db/operations'
 import { ModelService } from '../../src/main/models/modelService'
 import { apiError } from '../helpers/fakeAnthropic'
+import { offCandidates } from '../../src/main/chat/thinking'
+
+/** 思考の指定がモデルに受け付けられなかったときの 400 */
+const thinkingError = (): InstanceType<typeof Anthropic.APIError> =>
+  Anthropic.APIError.generate(
+    400,
+    {
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message: 'thinking.type: not supported for this model'
+      }
+    },
+    'thinking.type: not supported for this model',
+    new Headers()
+  )
 import { fakeChatClient, type FakeChat, type StreamBehavior } from '../helpers/fakeStream'
 
 const ADAPTIVE = 'claude-sonnet-test'
@@ -546,7 +563,7 @@ describe('思考量・共通の指示・要約・タイトル（Phase 2）', () 
     expect(off.extended_thinking).toBe(false)
   })
 
-  it('拡張思考をオフにすると thinking を指定せず、以前の思考ブロックも送らない（CHT-07）', async () => {
+  it('拡張思考をオフにすると思考を止める指定を送り、以前の思考ブロックも送らない（CHT-07）', async () => {
     setup([{ chunks: ['A1'], thinking: '考えた' }, { chunks: ['A2'] }])
     await sendAndWait('Q1')
     const stored = ops.getMessage(db, path()[1].id)!.content_blocks
@@ -555,10 +572,54 @@ describe('思考量・共通の指示・要約・タイトル（Phase 2）', () 
 
     ops.updateThread(db, threadId, { extended_thinking: false })
     await sendAndWait('Q2')
-    expect(fake.calls[1]).not.toHaveProperty('thinking')
+    expect(fake.calls[1].thinking).toEqual({ type: 'disabled' })
     expect(fake.calls[1]).not.toHaveProperty('betas')
     const assistant = fake.calls[1].messages.find((m) => m.role === 'assistant')!
     expect((assistant.content as { type: string }[]).map((b) => b.type)).toEqual(['text'])
+    // 受け付けられた指定を覚える
+    expect(ops.getSetting(db, `thinking.off.${ADAPTIVE}`)).toBe('disabled')
+  })
+
+  it('disabled を受け付けないモデルは between_tools を試し、覚えて次から使う（CHT-07）', async () => {
+    setup([{ error: thinkingError() }, { chunks: ['A1'] }, { chunks: ['A2'] }])
+    ops.updateThread(db, threadId, { extended_thinking: false })
+    const m = await sendAndWait('Q1')
+    expect(m.status).toBe('complete')
+    expect(fake.calls.map((c) => c.thinking)).toEqual([
+      { type: 'disabled' },
+      { type: 'between_tools' }
+    ])
+    // 待機・リトライの表示は出さない
+    expect(events.some((e) => e.type === 'retrying')).toBe(false)
+    await sendAndWait('Q2')
+    expect(fake.calls[2].thinking).toEqual({ type: 'between_tools' })
+  })
+
+  it('止められないモデルはオンのまま送り、次からは試さない（CHT-07）', async () => {
+    setup([
+      { error: thinkingError() },
+      { error: thinkingError() },
+      { chunks: ['A1'] },
+      { chunks: ['A2'] }
+    ])
+    ops.updateThread(db, threadId, { extended_thinking: false })
+    expect((await sendAndWait('Q1')).status).toBe('complete')
+    expect(fake.calls.map((c) => c.thinking?.type)).toEqual([
+      'disabled',
+      'between_tools',
+      'adaptive'
+    ])
+    expect(ops.getSetting(db, `thinking.off.${ADAPTIVE}`)).toBe('unsupported')
+    await sendAndWait('Q2')
+    expect(fake.calls[3].thinking?.type).toBe('adaptive')
+  })
+
+  it('思考量が xhigh・max では between_tools を使わず、止められないと決めつけない（CHT-07）', async () => {
+    setup([{ error: thinkingError() }, { chunks: ['A1'] }])
+    ops.updateThread(db, threadId, { extended_thinking: false, effort: 'high' })
+    // ADAPTIVE は low/medium/high のみ対応のため、ここでは offCandidates を直接確かめる
+    expect(offCandidates(db, ADAPTIVE, 'max')).toEqual(['disabled'])
+    expect(offCandidates(db, ADAPTIVE, 'high')).toEqual(['disabled', 'between_tools'])
   })
 
   it('共通のカスタム指示 → プロジェクトの順に結合する（PRJ-08）', async () => {

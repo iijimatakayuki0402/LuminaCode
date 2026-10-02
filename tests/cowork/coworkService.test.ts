@@ -131,23 +131,10 @@ describe('実行環境（Phase 0 の注意事項、SEC-33）', () => {
     expect(append).toContain(DELETE_TOOL)
   })
 
-  it('拡張思考をオフにしたスレッドでは思考を無効にする（CHT-07）', async () => {
-    const model = {
-      id: 'claude-sonnet-test',
-      display_name: 'S',
-      created_at: '2026-01-01',
-      max_input_tokens: 1e6,
-      max_tokens: 128000,
-      supports_adaptive_thinking: true,
-      effort_levels: ['low']
-    }
-    ops.setSetting(db, 'models_cache', JSON.stringify({ fetched_at: Date.now(), models: [model] }))
-    await send()
-    expect(fake.runs[0].options).not.toHaveProperty('thinking')
-
+  it('思考のオン／オフは Agent SDK に渡さない（CHT-07 は通常チャットのみ）', async () => {
     ops.updateThread(db, threadId, { extended_thinking: false })
     await send()
-    expect(fake.runs[1].options.thinking).toEqual({ type: 'disabled' })
+    expect(fake.runs[0].options).not.toHaveProperty('thinking')
   })
 
   it('TodoWrite の内容を todo のパネルに送る（COW-13）', async () => {

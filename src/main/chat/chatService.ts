@@ -32,6 +32,14 @@ import type { TitleGenerator } from './titleGenerator'
 import type { UsageService } from '../usage/usageService'
 import { ATTACHMENT_LIMITS, kindOfMime, toContentBlock, type AttachmentStore } from './attachments'
 import { estimateCost, type TokenUsage } from './pricing'
+import {
+  isThinkingConfigError,
+  offCandidates,
+  rememberOffMode,
+  THINKING_BETA,
+  thinkingParams,
+  type ThinkingMode
+} from './thinking'
 
 const { ValidationError } = ops
 
@@ -40,7 +48,6 @@ export const MAX_RETRIES = 3
 const RETRYABLE = new Set(['rate_limit', 'overloaded', 'server', 'timeout'])
 const MAX_WAIT_MS = 60_000
 const DEFAULT_MAX_TOKENS = 64_000
-const THINKING_BETA = 'thinking-binding-controls-2026-08-01'
 const TITLE_LENGTH = 40
 
 export interface ChatServiceDeps {
@@ -378,38 +385,33 @@ export class ChatService {
     const { emit } = this.deps
     const info = this.deps.modelService.getModelInfo(model)
     const thread = ops.getThread(this.deps.db, threadId)
-    // CHT-07: 拡張思考（モデルが対応していて、スレッドでオフにしていない場合）
-    const adaptive =
-      (info?.supports_adaptive_thinking ?? false) && thread?.extended_thinking !== false
     // CHT-07: 思考量（モデルが対応している場合のみ指定する）
     const effort =
       thread?.effort && info?.effort_levels.includes(thread.effort) ? thread.effort : null
+    // CHT-07: 拡張思考。オフにしたスレッドでは、モデルが受け付ける「止める指定」を順に試す（thinking.ts）
+    const supportsThinking = info?.supports_adaptive_thinking ?? false
+    const wantsOff = supportsThinking && thread?.extended_thinking === false
+    const offModes = wantsOff ? offCandidates(this.deps.db, model, effort) : []
+    let mode: ThinkingMode = !supportsThinking ? 'none' : (offModes[0] ?? 'on')
     // PRJ-08: グローバル → プロジェクトの順に結合する。CTX-02 の要約も加える
     const system = combineInstructions(
       this.deps.getGlobalInstructions?.() ?? '',
       project.custom_instructions,
       thread?.context_summary
     )
-    const params: Anthropic.Beta.MessageCreateParamsStreaming = {
+    const buildParams = (): Anthropic.Beta.MessageCreateParamsStreaming => ({
       model,
       max_tokens: Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS),
-      messages: this.buildMessages(threadId, assistantId, adaptive),
+      // 思考を止める場合は、以前の思考ブロックを送り返さない
+      messages: this.buildMessages(threadId, assistantId, mode === 'on'),
       stream: true,
       // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
       cache_control: { type: 'ephemeral' },
       ...(system ? { system } : {}),
       ...(effort ? { output_config: { effort } } : {}),
-      ...(adaptive
-        ? {
-            thinking: {
-              type: 'adaptive',
-              display: 'summarized',
-              block_binding: { prefix_mismatch_behavior: 'drop_block' }
-            },
-            betas: [THINKING_BETA]
-          }
-        : {})
-    }
+      ...thinkingParams(mode)
+    })
+    let params = buildParams()
 
     const apiKey = this.deps.getApiKey()
     if (apiKey === null) return this.finish(assistantId, 'error', '', null, 'auth', null)
@@ -456,6 +458,9 @@ export class ChatService {
           const final = await stream.finalMessage()
           Object.assign(usage, pickUsage(final.usage))
           flush()
+          if (mode === 'disabled' || mode === 'between_tools') {
+            rememberOffMode(this.deps.db, model, mode)
+          }
           const finalText = final.content
             .filter((b) => b.type === 'text')
             .map((b) => (b as { text: string }).text)
@@ -479,8 +484,23 @@ export class ChatService {
               usage
             })
           }
-          const apiError = toApiRequestError(error, 'chat.stream')
           const nothingYet = text === '' && thinking === ''
+          // CHT-07: 思考を止める指定を受け付けないモデルなら、次の指定を試す（どれも駄目ならオンのまま送る）
+          if (nothingYet && offModes.length > 0 && isThinkingConfigError(error)) {
+            offModes.shift()
+            const next = offModes[0]
+            if (!next && effort !== 'xhigh' && effort !== 'max') {
+              rememberOffMode(this.deps.db, model, 'unsupported')
+            }
+            console.warn(
+              `[chat] thinking mode ${mode} rejected for ${model}; trying ${next ?? 'on'}`
+            )
+            mode = next ?? 'on'
+            params = buildParams()
+            attempt--
+            continue
+          }
+          const apiError = toApiRequestError(error, 'chat.stream')
           if (nothingYet && RETRYABLE.has(apiError.kind) && attempt < MAX_RETRIES) {
             const waitMs = Math.min(retryAfterMs(error) ?? 2000 * 2 ** attempt, MAX_WAIT_MS)
             emit({
@@ -591,7 +611,8 @@ export class ChatService {
     const apiKey = this.deps.getApiKey()!
     const client = this.deps.createClient(apiKey)
     const info = this.deps.modelService.getModelInfo(model)
-    const thinking = (info?.supports_adaptive_thinking ?? false) && thread.extended_thinking
+    // 要約は質を優先し、対応するモデルでは常に思考をオンにする（スレッドの設定にかかわらない）
+    const thinking = info?.supports_adaptive_thinking ?? false
     const messages = this.buildMessages(threadId, '', thinking)
     messages.push({
       role: 'user',

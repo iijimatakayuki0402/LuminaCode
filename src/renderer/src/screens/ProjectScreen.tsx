@@ -399,8 +399,8 @@ export function ProjectScreen({
                 >
                   {ja.exchange.exportMarkdown}
                 </button>
-                {/* CHT-07: 拡張思考のオン／オフ（モデルが対応している場合） */}
-                {activeModelInfo?.supports_adaptive_thinking && (
+                {/* CHT-07: 拡張思考のオン／オフ（通常チャットで、モデルが対応している場合） */}
+                {project.type === 'chat' && activeModelInfo?.supports_adaptive_thinking && (
                   <label className="check" title={ja.project.thinkingNote}>
                     <input
                       type="checkbox"

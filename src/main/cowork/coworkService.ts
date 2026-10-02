@@ -750,11 +750,9 @@ export class CoworkService {
       },
       ...(this.deps.executablePath ? { pathToClaudeCodeExecutable: this.deps.executablePath } : {}),
       ...(budget !== null ? { maxBudgetUsd: budget } : {}),
-      // CHT-07: 思考量（モデルが対応している場合のみ）。思考をオフにしたスレッドでは無効にする
+      // CHT-07: 思考量（モデルが対応している場合のみ）。思考のオン／オフは通常チャットのみ
+      // （思考を止められないモデルがあり、止めると Agent SDK の実行が失敗するおそれがあるため）
       ...(effort ? { effort } : {}),
-      ...(modelInfo?.supports_adaptive_thinking && threadRow?.extended_thinking === false
-        ? { thinking: { type: 'disabled' as const } }
-        : {}),
       ...resume
     }
 
