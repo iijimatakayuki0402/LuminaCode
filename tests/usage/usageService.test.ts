@@ -169,3 +169,26 @@ describe('コンテキスト使用量（CTX-01）', () => {
     expect(usage.contextOf(thread)).toEqual({ tokens: 50 + 20 + 300 + 40, model: 'new' })
   })
 })
+
+describe('利用履歴の CSV（USG-06）', () => {
+  it('現地時刻・スレッド名つきで古い順に出し、月で絞り込める。数式になる値は無害化する', () => {
+    const thread = ops.createThread(db, { project_id: projectA, title: '=SUM(A1)' }).id
+    db.prepare(
+      `INSERT INTO usage_records (id, project_id, project_name, thread_id, model, input_tokens,
+         output_tokens, cache_read_tokens, cache_write_tokens, estimated_cost, created_at)
+       VALUES ('u1', ?, 'A', ?, 'claude-x', 100, 20, 5, 7, 0.0123, ?)`
+    ).run(projectA, thread, new Date(2026, 9, 3, 1, 50, 0).getTime())
+    record(projectB, 'B, "引用"', 0.5, new Date(2026, 8, 30, 23, 0, 0).getTime())
+
+    const all = usage.historyCsv()
+    expect(all.startsWith('﻿日時,プロジェクト,スレッド,モデル,')).toBe(true)
+    const lines = all.slice(1).trimEnd().split('\r\n')
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toBe('2026-09-30 23:00:00,"B, ""引用""",,m,100,10,0,0,0.500000')
+    expect(lines[2]).toBe("2026-10-03 01:50:00,A,'=SUM(A1),claude-x,100,20,5,7,0.012300")
+
+    const october = usage.historyCsv('2026-10').slice(1).trimEnd().split('\r\n')
+    expect(october).toHaveLength(2)
+    expect(october[1]).toContain('claude-x')
+  })
+})

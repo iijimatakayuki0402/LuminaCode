@@ -350,6 +350,10 @@ export function createHandlers({
 
     'usage:status': (projectId) => usage.status(v.optional(v.id)(projectId, 'projectId')),
     'usage:summary': (m) => usage.summary(v.optional(v.month)(m, 'month')),
+    'usage:exportCsv': (m) => {
+      const month = v.optional(v.month)(m, 'month')
+      return saveFile(`lumina-usage-${month ?? 'all'}.csv`, usage.historyCsv(month))
+    },
     'usage:threadTotals': (threadId) => usage.threadTotals(v.id(threadId, 'threadId')),
     'usage:context': (threadId) => {
       const { tokens, model } = usage.contextOf(v.id(threadId, 'threadId'))

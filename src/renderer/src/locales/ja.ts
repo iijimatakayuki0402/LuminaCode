@@ -319,6 +319,9 @@ export const ja = {
     nav: '使用量',
     title: 'USAGE',
     month: '月',
+    exportMonth: 'この月を CSV で書き出す',
+    exportAll: 'すべての期間を CSV で書き出す',
+    exported: (path: string) => `利用履歴を書き出しました: ${path}`,
     disclaimer:
       'コストは単価表に基づく概算です。実際の請求額とは異なります。正確な金額は Anthropic のコンソールで確認してください。',
     total: '当月の合計',

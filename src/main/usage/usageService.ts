@@ -16,6 +16,7 @@ import type {
 } from '@shared/types'
 import { DEFAULT_PRICES, estimateCost, type ModelPrice, type TokenUsage } from '../chat/pricing'
 import { deleteSetting, getSetting, setSetting, ValidationError } from '../db/operations'
+import { toCsv } from '../data/csv'
 
 /** 警告を出す割合（USG-04） */
 export const WARNING_RATIO = 0.8
@@ -37,6 +38,13 @@ const EMPTY: UsageTotals = {
 export function monthRange(month: string): { from: number; to: number } {
   const [y, m] = month.split('-').map(Number)
   return { from: new Date(y, m - 1, 1).getTime(), to: new Date(y, m, 1).getTime() }
+}
+
+/** 2026-10-03 01:50:00 の形（現地時刻） */
+export function localDateTime(epoch: number): string {
+  const d = new Date(epoch)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
 export function monthOf(epoch: number): string {
@@ -225,6 +233,56 @@ export class UsageService {
 
   projectTotals(projectId: string): UsageTotals {
     return this.totals('project_id = ?', [projectId])
+  }
+
+  /**
+   * 利用履歴の CSV（USG-06）。month を省略すると全期間。日時は表計算ソフトで扱いやすいよう現地時刻で出す
+   */
+  historyCsv(month?: string): string {
+    const range = month ? monthRange(month) : null
+    const rows = this.db
+      .prepare(
+        `SELECT u.created_at, u.project_name, t.title AS thread_title, u.model, u.input_tokens,
+           u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.estimated_cost
+         FROM usage_records u LEFT JOIN threads t ON t.id = u.thread_id
+         ${range ? 'WHERE u.created_at >= ? AND u.created_at < ?' : ''}
+         ORDER BY u.created_at, u.rowid`
+      )
+      .all(...(range ? [range.from, range.to] : [])) as {
+      created_at: number
+      project_name: string
+      thread_title: string | null
+      model: string
+      input_tokens: number
+      output_tokens: number
+      cache_read_tokens: number
+      cache_write_tokens: number
+      estimated_cost: number
+    }[]
+    return toCsv(
+      [
+        '日時',
+        'プロジェクト',
+        'スレッド',
+        'モデル',
+        '入力トークン',
+        '出力トークン',
+        'キャッシュ読み込みトークン',
+        'キャッシュ書き込みトークン',
+        '概算コスト（USD）'
+      ],
+      rows.map((r) => [
+        localDateTime(r.created_at),
+        r.project_name,
+        r.thread_title ?? '',
+        r.model,
+        r.input_tokens,
+        r.output_tokens,
+        r.cache_read_tokens,
+        r.cache_write_tokens,
+        r.estimated_cost.toFixed(6)
+      ])
+    )
   }
 
   summary(month = monthOf(this.now())): UsageSummary {

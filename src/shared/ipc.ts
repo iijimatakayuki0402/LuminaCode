@@ -166,6 +166,8 @@ export interface IpcContract {
   /** 使用量（USG-01〜05） */
   'usage:status': { args: [projectId?: string]; result: UsageStatus }
   'usage:summary': { args: [month?: string]; result: UsageSummary }
+  /** 利用履歴を CSV で書き出す（USG-06。month を省略すると全期間。キャンセル時は null） */
+  'usage:exportCsv': { args: [month?: string]; result: string | null }
   'usage:threadTotals': { args: [threadId: string]; result: UsageTotals }
   /** スレッドのコンテキスト使用量（CTX-01） */
   'usage:context': { args: [threadId: string]; result: ContextUsage }
@@ -340,6 +342,7 @@ export interface LuminaApi {
   usage: {
     status: Invoke<'usage:status'>
     summary: Invoke<'usage:summary'>
+    exportCsv: Invoke<'usage:exportCsv'>
     threadTotals: Invoke<'usage:threadTotals'>
     context: Invoke<'usage:context'>
     getLimits: Invoke<'usage:getLimits'>

@@ -46,6 +46,15 @@ export function UsageScreen(): React.JSX.Element {
     setProjects(p)
   }
 
+  const exportCsv = async (target?: string): Promise<void> => {
+    try {
+      const path = await unwrap(window.lumina.usage.exportCsv(target))
+      if (path) setMessage({ tone: 'info', text: ja.usage.exported(path) })
+    } catch (e) {
+      setMessage({ tone: 'error', text: (e as Error).message })
+    }
+  }
+
   if (!summary || !limits) {
     return (
       <main className="screen">
@@ -123,6 +132,19 @@ export function UsageScreen(): React.JSX.Element {
           {ja.usage.tokens(total.input_tokens, total.output_tokens)}・
           {ja.usage.requests(total.requests)}
         </p>
+        {/* USG-06: 利用履歴を CSV で書き出す */}
+        <div className="row">
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={() => void exportCsv(summary.month)}
+          >
+            {ja.usage.exportMonth}
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => void exportCsv()}>
+            {ja.usage.exportAll}
+          </button>
+        </div>
       </section>
 
       <section className="panel" aria-labelledby="usage-projects">

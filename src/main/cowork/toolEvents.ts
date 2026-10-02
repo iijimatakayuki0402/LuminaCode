@@ -6,6 +6,7 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import type { PermissionMethod, ToolCategory, ToolEventInfo } from '@shared/types'
+import { toCsv } from '../data/csv'
 
 /** 結果の要約の最大長（出力の全文は残さない） */
 export const RESULT_SUMMARY_LENGTH = 2000
@@ -185,24 +186,11 @@ const CSV_COLUMNS: (keyof ToolEventRow)[] = [
   'result'
 ]
 
-const csvCell = (value: unknown): string => {
-  const text =
-    value === null || value === undefined
-      ? ''
-      : typeof value === 'number' && value > 1e12
-        ? new Date(value).toISOString()
-        : String(value)
-  // 表計算ソフトで数式として解釈されないようにする
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
-  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
-}
-
 /** 操作ログの書き出し（LOG-02）。CSV は Excel で開けるよう BOM を付ける */
 export function formatToolEvents(rows: ToolEventRow[], format: 'csv' | 'json'): string {
   if (format === 'json') return JSON.stringify(rows, null, 2)
-  const lines = [
-    CSV_COLUMNS.join(','),
-    ...rows.map((r) => CSV_COLUMNS.map((c) => csvCell(r[c])).join(','))
-  ]
-  return `\ufeff${lines.join('\r\n')}\r\n`
+  return toCsv(
+    CSV_COLUMNS,
+    rows.map((r) => CSV_COLUMNS.map((c) => r[c]))
+  )
 }

@@ -123,6 +123,7 @@ const api: LuminaApi = {
   usage: {
     status: invoke('usage:status'),
     summary: invoke('usage:summary'),
+    exportCsv: invoke('usage:exportCsv'),
     threadTotals: invoke('usage:threadTotals'),
     context: invoke('usage:context'),
     getLimits: invoke('usage:getLimits'),
