@@ -1,0 +1,466 @@
+/**
+ * データベース操作
+ * CRUD操作を提供
+ */
+
+import Database from 'better-sqlite3'
+import { randomUUID } from 'node:crypto'
+
+// ========================================
+// 型定義
+// ========================================
+
+// SQLiteの行型定義
+interface ProjectRow {
+  id: string
+  type: string
+  name: string
+  custom_instructions: string | null
+  work_folder: string | null
+  model: string | null
+  permission_mode: string
+  pinned: number
+  archived: number
+  created_at: number
+  updated_at: number
+}
+
+interface ThreadRow {
+  id: string
+  project_id: string
+  title: string | null
+  model: string | null
+  extended_thinking: number
+  created_at: number
+  updated_at: number
+}
+
+interface MessageRow {
+  id: string
+  thread_id: string
+  parent_id: string | null
+  role: string
+  content: string
+  tokens_used: number | null
+  estimated_cost: number | null
+  created_at: number
+}
+
+export type ProjectType = 'chat' | 'cowork'
+export type PermissionMode = 'confirm_each' | 'auto_edit' | 'plan_only'
+export type MessageRole = 'user' | 'assistant'
+
+export interface Project {
+  id: string
+  type: ProjectType
+  name: string
+  custom_instructions: string | null
+  work_folder: string | null
+  model: string | null
+  permission_mode: PermissionMode
+  pinned: boolean
+  archived: boolean
+  created_at: number
+  updated_at: number
+}
+
+export interface Thread {
+  id: string
+  project_id: string
+  title: string | null
+  model: string | null
+  extended_thinking: boolean
+  created_at: number
+  updated_at: number
+}
+
+export interface Message {
+  id: string
+  thread_id: string
+  parent_id: string | null
+  role: MessageRole
+  content: string
+  tokens_used: number | null
+  estimated_cost: number | null
+  created_at: number
+}
+
+export interface Setting {
+  key: string
+  value: string
+  updated_at: number
+}
+
+// ========================================
+// Project操作
+// ========================================
+
+export interface CreateProjectInput {
+  type: ProjectType
+  name: string
+  custom_instructions?: string
+  work_folder?: string
+  model?: string
+  permission_mode?: PermissionMode
+}
+
+export function createProject(db: Database.Database, input: CreateProjectInput): Project {
+  const now = Date.now()
+  const id = randomUUID()
+
+  const stmt = db.prepare(`
+    INSERT INTO projects (
+      id, type, name, custom_instructions, work_folder, model, permission_mode,
+      pinned, archived, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+  `)
+
+  stmt.run(
+    id,
+    input.type,
+    input.name,
+    input.custom_instructions ?? null,
+    input.work_folder ?? null,
+    input.model ?? null,
+    input.permission_mode ?? 'confirm_each',
+    now,
+    now
+  )
+
+  return getProject(db, id)!
+}
+
+export function getProject(db: Database.Database, id: string): Project | null {
+  const stmt = db.prepare('SELECT * FROM projects WHERE id = ?')
+  const row = stmt.get(id) as ProjectRow | undefined
+
+  if (!row) return null
+
+  return {
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    custom_instructions: row.custom_instructions,
+    work_folder: row.work_folder,
+    model: row.model,
+    permission_mode: row.permission_mode,
+    pinned: Boolean(row.pinned),
+    archived: Boolean(row.archived),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  }
+}
+
+export interface UpdateProjectInput {
+  name?: string
+  custom_instructions?: string
+  work_folder?: string
+  model?: string
+  permission_mode?: PermissionMode
+  pinned?: boolean
+  archived?: boolean
+}
+
+export function updateProject(
+  db: Database.Database,
+  id: string,
+  input: UpdateProjectInput
+): Project | null {
+  const current = getProject(db, id)
+  if (!current) return null
+
+  const now = Date.now()
+  const updates: string[] = []
+  const values: (string | number | null)[] = []
+
+  if (input.name !== undefined) {
+    updates.push('name = ?')
+    values.push(input.name)
+  }
+  if (input.custom_instructions !== undefined) {
+    updates.push('custom_instructions = ?')
+    values.push(input.custom_instructions || null)
+  }
+  if (input.work_folder !== undefined) {
+    updates.push('work_folder = ?')
+    values.push(input.work_folder || null)
+  }
+  if (input.model !== undefined) {
+    updates.push('model = ?')
+    values.push(input.model || null)
+  }
+  if (input.permission_mode !== undefined) {
+    updates.push('permission_mode = ?')
+    values.push(input.permission_mode)
+  }
+  if (input.pinned !== undefined) {
+    updates.push('pinned = ?')
+    values.push(input.pinned ? 1 : 0)
+  }
+  if (input.archived !== undefined) {
+    updates.push('archived = ?')
+    values.push(input.archived ? 1 : 0)
+  }
+
+  if (updates.length === 0) return current
+
+  updates.push('updated_at = ?')
+  values.push(now)
+  values.push(id)
+
+  const stmt = db.prepare(`UPDATE projects SET ${updates.join(', ')} WHERE id = ?`)
+  stmt.run(...values)
+
+  return getProject(db, id)
+}
+
+export function deleteProject(db: Database.Database, id: string): boolean {
+  const stmt = db.prepare('DELETE FROM projects WHERE id = ?')
+  const result = stmt.run(id)
+  return result.changes > 0
+}
+
+export function listProjects(db: Database.Database): Project[] {
+  const stmt = db.prepare(`
+    SELECT * FROM projects
+    WHERE archived = 0
+    ORDER BY pinned DESC, updated_at DESC
+  `)
+  const rows = stmt.all() as ProjectRow[]
+
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    custom_instructions: row.custom_instructions,
+    work_folder: row.work_folder,
+    model: row.model,
+    permission_mode: row.permission_mode,
+    pinned: Boolean(row.pinned),
+    archived: Boolean(row.archived),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  }))
+}
+
+// ========================================
+// Thread操作
+// ========================================
+
+export interface CreateThreadInput {
+  project_id: string
+  title?: string
+  model?: string
+  extended_thinking?: boolean
+}
+
+export function createThread(db: Database.Database, input: CreateThreadInput): Thread {
+  const now = Date.now()
+  const id = randomUUID()
+
+  const stmt = db.prepare(`
+    INSERT INTO threads (
+      id, project_id, title, model, extended_thinking, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  stmt.run(
+    id,
+    input.project_id,
+    input.title ?? null,
+    input.model ?? null,
+    input.extended_thinking ? 1 : 0,
+    now,
+    now
+  )
+
+  return getThread(db, id)!
+}
+
+export function getThread(db: Database.Database, id: string): Thread | null {
+  const stmt = db.prepare('SELECT * FROM threads WHERE id = ?')
+  const row = stmt.get(id) as ThreadRow | undefined
+
+  if (!row) return null
+
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    title: row.title,
+    model: row.model,
+    extended_thinking: Boolean(row.extended_thinking),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  }
+}
+
+export interface UpdateThreadInput {
+  title?: string
+  model?: string
+  extended_thinking?: boolean
+}
+
+export function updateThread(
+  db: Database.Database,
+  id: string,
+  input: UpdateThreadInput
+): Thread | null {
+  const current = getThread(db, id)
+  if (!current) return null
+
+  const now = Date.now()
+  const updates: string[] = []
+  const values: (string | number | null)[] = []
+
+  if (input.title !== undefined) {
+    updates.push('title = ?')
+    values.push(input.title || null)
+  }
+  if (input.model !== undefined) {
+    updates.push('model = ?')
+    values.push(input.model || null)
+  }
+  if (input.extended_thinking !== undefined) {
+    updates.push('extended_thinking = ?')
+    values.push(input.extended_thinking ? 1 : 0)
+  }
+
+  if (updates.length === 0) return current
+
+  updates.push('updated_at = ?')
+  values.push(now)
+  values.push(id)
+
+  const stmt = db.prepare(`UPDATE threads SET ${updates.join(', ')} WHERE id = ?`)
+  stmt.run(...values)
+
+  return getThread(db, id)
+}
+
+export function deleteThread(db: Database.Database, id: string): boolean {
+  const stmt = db.prepare('DELETE FROM threads WHERE id = ?')
+  const result = stmt.run(id)
+  return result.changes > 0
+}
+
+export function listThreadsByProject(db: Database.Database, projectId: string): Thread[] {
+  const stmt = db.prepare(`
+    SELECT * FROM threads
+    WHERE project_id = ?
+    ORDER BY updated_at DESC
+  `)
+  const rows = stmt.all(projectId) as ThreadRow[]
+
+  return rows.map((row) => ({
+    id: row.id,
+    project_id: row.project_id,
+    title: row.title,
+    model: row.model,
+    extended_thinking: Boolean(row.extended_thinking),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  }))
+}
+
+// ========================================
+// Message操作
+// ========================================
+
+export interface CreateMessageInput {
+  thread_id: string
+  parent_id?: string
+  role: MessageRole
+  content: string
+  tokens_used?: number
+  estimated_cost?: number
+}
+
+export function createMessage(db: Database.Database, input: CreateMessageInput): Message {
+  const now = Date.now()
+  const id = randomUUID()
+
+  const stmt = db.prepare(`
+    INSERT INTO messages (
+      id, thread_id, parent_id, role, content, tokens_used, estimated_cost, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  stmt.run(
+    id,
+    input.thread_id,
+    input.parent_id ?? null,
+    input.role,
+    input.content,
+    input.tokens_used ?? null,
+    input.estimated_cost ?? null,
+    now
+  )
+
+  return getMessage(db, id)!
+}
+
+export function getMessage(db: Database.Database, id: string): Message | null {
+  const stmt = db.prepare('SELECT * FROM messages WHERE id = ?')
+  const row = stmt.get(id) as MessageRow | undefined
+
+  if (!row) return null
+
+  return {
+    id: row.id,
+    thread_id: row.thread_id,
+    parent_id: row.parent_id,
+    role: row.role,
+    content: row.content,
+    tokens_used: row.tokens_used,
+    estimated_cost: row.estimated_cost,
+    created_at: row.created_at
+  }
+}
+
+export function listMessagesByThread(db: Database.Database, threadId: string): Message[] {
+  const stmt = db.prepare(`
+    SELECT * FROM messages
+    WHERE thread_id = ?
+    ORDER BY created_at ASC
+  `)
+  const rows = stmt.all(threadId) as MessageRow[]
+
+  return rows.map((row) => ({
+    id: row.id,
+    thread_id: row.thread_id,
+    parent_id: row.parent_id,
+    role: row.role,
+    content: row.content,
+    tokens_used: row.tokens_used,
+    estimated_cost: row.estimated_cost,
+    created_at: row.created_at
+  }))
+}
+
+// ========================================
+// Settings操作
+// ========================================
+
+export function getSetting(db: Database.Database, key: string): string | null {
+  const stmt = db.prepare('SELECT value FROM settings WHERE key = ?')
+  const row = stmt.get(key) as { value: string } | undefined
+  return row?.value ?? null
+}
+
+export function setSetting(db: Database.Database, key: string, value: string): void {
+  const now = Date.now()
+
+  const stmt = db.prepare(`
+    INSERT INTO settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
+  `)
+
+  stmt.run(key, value, now, value, now)
+}
+
+export function deleteSetting(db: Database.Database, key: string): boolean {
+  const stmt = db.prepare('DELETE FROM settings WHERE key = ?')
+  const result = stmt.run(key)
+  return result.changes > 0
+}
