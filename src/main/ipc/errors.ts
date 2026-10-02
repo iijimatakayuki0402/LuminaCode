@@ -3,6 +3,7 @@
  */
 
 import type { IpcError } from '@shared/ipc'
+import { ApiRequestError } from '../api/errors'
 import { ValidationError } from '../db/operations'
 
 export class NotFoundError extends Error {
@@ -27,6 +28,9 @@ export class InvalidArgumentError extends Error {
 export function toIpcError(error: unknown, channel: string): IpcError {
   if (error instanceof ValidationError) return { code: 'validation', message: error.message }
   if (error instanceof NotFoundError) return { code: 'not_found', message: error.message }
+  if (error instanceof ApiRequestError) {
+    return { code: 'api', message: error.message, apiKind: error.kind }
+  }
   if (error instanceof InvalidArgumentError) {
     return { code: 'invalid_argument', message: error.message }
   }

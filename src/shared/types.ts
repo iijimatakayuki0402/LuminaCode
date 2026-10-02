@@ -83,3 +83,31 @@ export interface UpdateThreadInput {
   model?: string
   extended_thinking?: boolean
 }
+
+// ========================================
+// API キー・モデル（要件 6.8）
+// ========================================
+
+export interface ApiKeyStatus {
+  configured: boolean
+  /** マスク表示（末尾 4 文字のみ）。未設定時は null（要件 KEY-03） */
+  masked: string | null
+  /** OS の暗号化（DPAPI）が利用できるか。利用できない場合は保存しない */
+  encryptionAvailable: boolean
+}
+
+export interface ModelInfo {
+  id: string
+  display_name: string
+  created_at: string
+  max_input_tokens: number | null
+  max_tokens: number | null
+}
+
+export interface ModelList {
+  models: ModelInfo[]
+  /** 一覧を取得した日時（epoch ms）。未取得なら null */
+  fetched_at: number | null
+  /** API から取得できず、前回のキャッシュを返している（要件 MDL-02） */
+  stale: boolean
+}

@@ -2,16 +2,38 @@
  * IPC ハンドラーのテスト（登録処理を通した結果の値で確認する）
  */
 
+import type Anthropic from '@anthropic-ai/sdk'
 import type Database from 'better-sqlite3'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcChannel, IpcResult } from '../../src/shared/ipc'
-import type { Project, Thread } from '../../src/shared/types'
+import type { ApiKeyStatus, ModelList, Project, Thread } from '../../src/shared/types'
 import { createInMemoryDatabase } from '../../src/main/db/init'
 import { createHandlers, type IpcHandlers } from '../../src/main/ipc/handlers'
 import { invokeHandler } from '../../src/main/ipc/register'
+import { ModelService } from '../../src/main/models/modelService'
+import { ApiKeyStore, type SecretCipher } from '../../src/main/secrets/apiKeyStore'
+import { apiError, fakeClient } from '../helpers/fakeAnthropic'
+
+const VALID_KEY = 'sk-ant-valid-key-1234'
+const MODELS = [
+  { id: 'claude-sonnet-a', created_at: '2026-01-01T00:00:00Z' },
+  { id: 'claude-opus-b', created_at: '2026-02-01T00:00:00Z' }
+]
+
+const cipher: SecretCipher = {
+  isEncryptionAvailable: () => true,
+  encryptString: (s) => Buffer.from(s).reverse(),
+  decryptString: (b) => Buffer.from(b).reverse().toString()
+}
 
 let db: Database.Database
 let handlers: IpcHandlers
+let dir: string
+let keyFile: string
+let usedKeys: string[]
 
 const call = <T = unknown>(channel: IpcChannel, ...args: unknown[]): Promise<IpcResult<T>> =>
   invokeHandler(handlers, channel, true, args) as Promise<IpcResult<T>>
@@ -24,14 +46,36 @@ async function value<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
 
 beforeEach(() => {
   db = createInMemoryDatabase()
+  dir = mkdtempSync(join(tmpdir(), 'lumina-ipc-'))
+  keyFile = join(dir, 'api-key.bin')
+  usedKeys = []
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+  // VALID_KEY のときだけ成功し、それ以外は 401 を返すクライアント
+  const createClient = (apiKey: string): Anthropic => {
+    usedKeys.push(apiKey)
+    return apiKey === VALID_KEY
+      ? fakeClient({ models: MODELS }).client
+      : fakeClient({ error: apiError(401, 'authentication_error') }).client
+  }
+  const apiKeyStore = new ApiKeyStore(keyFile, cipher)
+  const modelService = new ModelService(db, () => {
+    const key = apiKeyStore.get()
+    return key === null ? null : createClient(key)
+  })
+
   handlers = createHandlers({
     db,
+    apiKeyStore,
+    modelService,
+    createClient,
     appInfo: { version: '0.1.0', electron: 'e', chrome: 'c', dataPath: 'C:\\data' }
   })
 })
 
 afterEach(() => {
   db.close()
+  rmSync(dir, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 
@@ -158,5 +202,76 @@ describe('threads / messages', () => {
       ok: false,
       error: { code: 'not_found' }
     })
+  })
+})
+
+describe('apiKey / models（要件 KEY-01〜04、MDL-01〜05）', () => {
+  it('無効なキーは疎通テストで拒否され、保存されない（受け入れ基準 2）', async () => {
+    const result = await call('apiKey:save', 'sk-ant-invalid-0000')
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'api',
+        apiKind: 'auth',
+        message: 'API キーが無効です。設定画面で API キーを確認してください。'
+      }
+    })
+    expect(existsSync(keyFile)).toBe(false)
+    expect((await value<ApiKeyStatus>('apiKey:getStatus')).configured).toBe(false)
+  })
+
+  it('有効なキーは保存され、モデル一覧と既定モデルが設定される', async () => {
+    const status = await value<ApiKeyStatus>('apiKey:save', `  ${VALID_KEY}  `)
+
+    expect(status).toEqual({ configured: true, masked: '••••••••1234', encryptionAvailable: true })
+    expect(usedKeys[0]).toBe(VALID_KEY)
+    expect(readFileSync(keyFile).toString()).not.toContain(VALID_KEY)
+    expect(await value('models:getDefault')).toBe('claude-sonnet-a')
+
+    const list = await value<ModelList>('models:list')
+    expect(list.models.map((m) => m.id)).toEqual(['claude-sonnet-a', 'claude-opus-b'])
+  })
+
+  it('API キーが renderer への戻り値に含まれない', async () => {
+    const results = [
+      await call('apiKey:save', VALID_KEY),
+      await call('apiKey:getStatus'),
+      await call('apiKey:test'),
+      await call('models:list', true)
+    ]
+    for (const result of results) {
+      expect(JSON.stringify(result)).not.toContain('valid-key')
+    }
+  })
+
+  it('保存済みキーの疎通テスト。未設定なら validation', async () => {
+    expect(await call('apiKey:test')).toMatchObject({ error: { code: 'validation' } })
+    await value('apiKey:save', VALID_KEY)
+    expect(await call('apiKey:test')).toEqual({ ok: true, value: undefined })
+  })
+
+  it('キーを削除できる', async () => {
+    await value('apiKey:save', VALID_KEY)
+    const status = await value<ApiKeyStatus>('apiKey:delete')
+
+    expect(status.configured).toBe(false)
+    expect(existsSync(keyFile)).toBe(false)
+  })
+
+  it('既定モデルを変更できる。一覧に無いモデルは validation', async () => {
+    await value('apiKey:save', VALID_KEY)
+
+    await value('models:setDefault', 'claude-opus-b')
+    expect(await value('models:getDefault')).toBe('claude-opus-b')
+    expect(await call('models:setDefault', 'claude-unknown')).toMatchObject({
+      error: { code: 'validation' }
+    })
+  })
+
+  it('引数の形式を検証する', async () => {
+    expect(await call('apiKey:save', 123)).toMatchObject({ error: { code: 'invalid_argument' } })
+    expect(await call('apiKey:save', '')).toMatchObject({ error: { code: 'validation' } })
+    expect(await call('models:list', 'yes')).toMatchObject({ error: { code: 'invalid_argument' } })
   })
 })

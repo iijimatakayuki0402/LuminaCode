@@ -5,7 +5,11 @@
 
 import type Database from 'better-sqlite3'
 import type { AppInfo, IpcChannel, IpcReturn } from '@shared/ipc'
+import type { ClientFactory } from '../api/client'
+import { testApiKey } from '../api/connection'
 import * as ops from '../db/operations'
+import type { ModelService } from '../models/modelService'
+import { normalizeApiKey, type ApiKeyStore } from '../secrets/apiKeyStore'
 import { NotFoundError } from './errors'
 import * as v from './validate'
 
@@ -16,6 +20,9 @@ export type IpcHandlers = {
 export interface HandlerDeps {
   db: Database.Database
   appInfo: AppInfo
+  apiKeyStore: ApiKeyStore
+  modelService: ModelService
+  createClient: ClientFactory
 }
 
 function found<T>(value: T | null, message: string): T {
@@ -29,8 +36,15 @@ function deleted(changed: boolean, message: string): void {
 
 const PROJECT_NOT_FOUND = 'プロジェクトが見つかりません。'
 const THREAD_NOT_FOUND = 'スレッドが見つかりません。'
+const API_KEY_NOT_CONFIGURED = 'API キーが設定されていません。'
 
-export function createHandlers({ db, appInfo }: HandlerDeps): IpcHandlers {
+export function createHandlers({
+  db,
+  appInfo,
+  apiKeyStore,
+  modelService,
+  createClient
+}: HandlerDeps): IpcHandlers {
   return {
     'app:getInfo': () => appInfo,
 
@@ -65,6 +79,29 @@ export function createHandlers({ db, appInfo }: HandlerDeps): IpcHandlers {
     'threads:getLastOpened': (projectId) =>
       ops.getLastOpenedThread(db, v.id(projectId, 'projectId')),
 
-    'messages:listByThread': (threadId) => ops.listMessagesByThread(db, v.id(threadId, 'threadId'))
+    'messages:listByThread': (threadId) => ops.listMessagesByThread(db, v.id(threadId, 'threadId')),
+
+    'apiKey:getStatus': () => apiKeyStore.status(),
+    'apiKey:save': async (input) => {
+      const apiKey = normalizeApiKey(v.str(input, 'apiKey'))
+      await testApiKey(createClient, apiKey)
+      apiKeyStore.save(apiKey)
+      // 一覧の取得と既定モデルの設定は、保存の成否に影響させない
+      await modelService.list(true).catch(() => undefined)
+      return apiKeyStore.status()
+    },
+    'apiKey:test': async () => {
+      const apiKey = apiKeyStore.get()
+      if (apiKey === null) throw new ops.ValidationError(API_KEY_NOT_CONFIGURED)
+      await testApiKey(createClient, apiKey)
+    },
+    'apiKey:delete': () => {
+      apiKeyStore.delete()
+      return apiKeyStore.status()
+    },
+
+    'models:list': (refresh) => modelService.list(v.optional(v.bool)(refresh, 'refresh') ?? false),
+    'models:getDefault': () => modelService.getDefaultModel(),
+    'models:setDefault': (modelId) => modelService.setDefaultModel(v.str(modelId, 'modelId'))
   }
 }

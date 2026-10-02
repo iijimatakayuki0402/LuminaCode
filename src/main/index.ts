@@ -1,10 +1,13 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
+import { createAnthropicClient } from './api/client'
 import { getSnapshotsDir, pruneOrphanSnapshotFiles } from './cowork/snapshot'
 import { closeDatabase, DatabaseIntegrityError, getDatabase } from './db/init'
 import { createHandlers } from './ipc/handlers'
 import { registerIpcHandlers } from './ipc/register'
+import { ModelService } from './models/modelService'
+import { ApiKeyStore } from './secrets/apiKeyStore'
 import { isTrustedSenderUrl, type TrustedOrigin } from './security/ipcSender'
 
 // 要件 5.3: データ保存先を %APPDATA%\LuminaCode\ に固定する（既定はパッケージ名で決まるため明示する）
@@ -76,9 +79,19 @@ function setupBackend(): boolean {
     console.warn('[startup] snapshot cleanup failed:', error)
   }
 
+  // 要件 5.3: API キーは %APPDATA%\LuminaCode\ 配下に safeStorage（DPAPI）で暗号化して保存する
+  const apiKeyStore = new ApiKeyStore(join(app.getPath('userData'), 'api-key.bin'), safeStorage)
+  const modelService = new ModelService(db, () => {
+    const apiKey = apiKeyStore.get()
+    return apiKey === null ? null : createAnthropicClient(apiKey)
+  })
+
   registerIpcHandlers(
     createHandlers({
       db,
+      apiKeyStore,
+      modelService,
+      createClient: createAnthropicClient,
       appInfo: {
         version: app.getVersion(),
         electron: process.versions.electron,

@@ -30,6 +30,17 @@ const api: LuminaApi = {
   },
   messages: {
     listByThread: invoke('messages:listByThread')
+  },
+  apiKey: {
+    getStatus: invoke('apiKey:getStatus'),
+    save: invoke('apiKey:save'),
+    test: invoke('apiKey:test'),
+    delete: invoke('apiKey:delete')
+  },
+  models: {
+    list: invoke('models:list'),
+    getDefault: invoke('models:getDefault'),
+    setDefault: invoke('models:setDefault')
   }
 }
 

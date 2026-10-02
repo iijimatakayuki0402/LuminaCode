@@ -28,7 +28,7 @@ export const id: Check<string> = (value, name) =>
     ? value
     : fail(name, 'ID 文字列')
 
-const bool: Check<boolean> = (value, name) =>
+export const bool: Check<boolean> = (value, name) =>
   typeof value === 'boolean' ? value : fail(name, '真偽値')
 
 const oneOf =
@@ -36,7 +36,7 @@ const oneOf =
   (value, name) =>
     values.includes(value as T) ? (value as T) : fail(name, values.join(' / ') + ' のいずれか')
 
-const optional =
+export const optional =
   <T>(check: Check<T>): Check<T | undefined> =>
   (value, name) =>
     value === undefined ? undefined : check(value, name)

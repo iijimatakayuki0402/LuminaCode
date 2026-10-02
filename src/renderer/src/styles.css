@@ -12,6 +12,9 @@
   --bg: #0e1116;
   --fg: #e6e9ef;
   --muted: #9aa3b2;
+  /* data-accent 未指定時（既定の水色）のダーク用の値 */
+  --accent: #6ccbf2;
+  --accent-bg: #15303d;
 }
 :root[data-accent='purple'] {
   --accent: #8b6fd6;
@@ -49,4 +52,137 @@ body {
 }
 .muted {
   color: var(--muted);
+}
+
+/* 共通部品（DSN-01: 小さめの角丸、細い罫線、アクセントは枠線・ボタン・選択状態に絞る） */
+:root {
+  --surface: #ffffff;
+  --border: #d5dae2;
+  --danger: #c0392b;
+  --danger-bg: #fdecea;
+  --radius: 3px;
+}
+:root[data-mode='dark'] {
+  --surface: #161b22;
+  --border: #2d3440;
+  --danger: #ff8a80;
+  --danger-bg: #3a1d1d;
+}
+.screen {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+.screen-title {
+  margin: 0 0 1.5rem;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.panel p {
+  margin: 0 0 1rem;
+}
+.panel h2 {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+}
+.field label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.input,
+.select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+}
+.input.mono,
+.mono {
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.9rem;
+  font: inherit;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* DSN-04: 薄いアクセント色は文字色に使わず、枠線と背景に使う */
+.btn-primary {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-link {
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.message {
+  border-left: 3px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+.message-error {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.message-info {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.brand {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: var(--accent);
+  letter-spacing: 0.06em;
 }
