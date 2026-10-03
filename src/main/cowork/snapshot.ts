@@ -211,8 +211,10 @@ export function undoRun(
   writeRoots: string[] = []
 ): UndoResult {
   const roots = [workRoot, ...writeRoots]
-  const records = firstPerFile(listByMessage(db, messageId).filter((r) => r.restored_at === null))
+  const pending = listByMessage(db, messageId).filter((r) => r.restored_at === null)
+  const records = firstPerFile(pending)
   const result: UndoResult = { restored: [], skipped: [] }
+  const skippedFiles = new Set<string>()
   // 後から行った変更から順に戻す
   for (const r of [...records].reverse()) {
     const path = displayPath(workRoot, r.file_path)
@@ -229,16 +231,24 @@ export function undoRun(
         const trashPath = r.trash_path
         const root =
           roots.find((root) => isInsideWorkFolder(join(root, TRASH_DIR), trashPath)) ?? workRoot
+        // 削除した後に同じ名前で作り直したファイルは、退避してから元のファイルを戻す
+        if (existsSync(r.file_path) && existsSync(trashPath)) {
+          moveToTrash(rootFor(roots, r.file_path) ?? workRoot, [r.file_path])
+        }
         restoreTrashedPath(root, trashPath)
       }
       result.restored.push(path)
     } catch (error) {
       result.skipped.push({ path, reason: (error as Error).message })
+      skippedFiles.add(r.file_path.toLowerCase())
     }
   }
-  db.prepare(
-    'UPDATE snapshots SET restored_at = ? WHERE message_id = ? AND restored_at IS NULL'
-  ).run(Date.now(), messageId)
+  // 戻せなかったファイルは、もう一度試せるよう未復元のままにする
+  const mark = db.prepare('UPDATE snapshots SET restored_at = ? WHERE id = ?')
+  const now = Date.now()
+  db.transaction(() => {
+    for (const r of pending) if (!skippedFiles.has(r.file_path.toLowerCase())) mark.run(now, r.id)
+  })()
   return result
 }
 

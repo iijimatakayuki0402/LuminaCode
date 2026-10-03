@@ -89,11 +89,15 @@ export interface ChatServiceDeps {
 const abortableSleep = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error('aborted'))
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => {
+    const onAbort = (): void => {
       clearTimeout(timer)
       reject(new Error('aborted'))
-    })
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 
 function retryAfterMs(error: unknown): number | null {
@@ -107,7 +111,14 @@ type ContentBlock = { type: string; text?: string; thinking?: string }
 
 function thinkingOf(record: ops.MessageRecord): string | null {
   if (!record.content_blocks) return null
-  const text = (JSON.parse(record.content_blocks) as ContentBlock[])
+  let blocks: ContentBlock[]
+  try {
+    blocks = JSON.parse(record.content_blocks) as ContentBlock[]
+  } catch {
+    return null
+  }
+  if (!Array.isArray(blocks)) return null
+  const text = blocks
     .filter((b) => b.type === 'thinking' && b.thinking)
     .map((b) => b.thinking)
     .join('\n\n')
@@ -349,7 +360,17 @@ export class ChatService {
     const controller = new AbortController()
     const entry = { controller, done: Promise.resolve() }
     entry.done = this.generate(project, threadId, assistant.id, model, controller.signal)
-      .catch((error) => console.error('[chat] unexpected failure:', (error as Error).name))
+      .catch((error) => {
+        console.error('[chat] unexpected failure:', (error as Error).name)
+        // 生成中のまま残らないよう、エラーとして閉じる
+        try {
+          if (ops.getMessage(this.deps.db, assistant.id)?.status === 'streaming') {
+            this.finish(assistant.id, 'error', '', null, 'unknown', null)
+          }
+        } catch (inner) {
+          console.error('[chat] failed to close the reply:', (inner as Error).name)
+        }
+      })
       // 完了の通知の後に次の生成が始まっていれば、そちらは消さない
       .finally(() => {
         if (this.running.get(threadId) === entry) this.running.delete(threadId)
@@ -388,13 +409,14 @@ export class ChatService {
           messages.push({ role: 'assistant', content: [{ type: 'text', text }] })
           continue
         }
-        messages.push({
-          role: 'assistant',
-          // CHT-07: 思考をオフにした場合は、以前の思考ブロックを送り返さない
-          content: thinking
-            ? blocks
-            : blocks.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking')
-        })
+        // CHT-07: 思考をオフにした場合は、以前の思考ブロックを送り返さない
+        const content = thinking
+          ? blocks
+          : blocks.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking')
+        // 空の応答は API が受け付けないため送らない（本文があれば本文だけ送る）
+        if (content.length > 0) messages.push({ role: 'assistant', content })
+        else if (m.content.trim() !== '')
+          messages.push({ role: 'assistant', content: [{ type: 'text', text: m.content }] })
       } else if (m.content.trim() !== '') {
         messages.push({ role: 'assistant', content: [{ type: 'text', text: m.content }] })
       }
@@ -509,6 +531,7 @@ export class ChatService {
     const timer = setInterval(flush, this.deps.flushIntervalMs ?? 50)
 
     let continuations = 0
+    let completed: { text: string; blocks: string; stopReason: string | null } | null = null
     try {
       for (let attempt = 0; ; attempt++) {
         try {
@@ -573,15 +596,13 @@ export class ChatService {
             .filter((b) => b.type === 'text')
             .map((b) => (b as { text: string }).text)
             .join('')
-          return this.finish(
-            assistantId,
-            'complete',
-            finalText,
-            JSON.stringify(content),
-            null,
-            final.stop_reason,
-            { project, threadId, model, usage: total() }
-          )
+          // 完了の保存は try の外で行う（保存の失敗を API のエラーとして扱わないように）
+          completed = {
+            text: finalText,
+            blocks: JSON.stringify(content),
+            stopReason: final.stop_reason
+          }
+          break
         } catch (error) {
           flush()
           if (signal.aborted) {
@@ -635,6 +656,15 @@ export class ChatService {
           })
         }
       }
+      return this.finish(
+        assistantId,
+        'complete',
+        completed.text,
+        completed.blocks,
+        null,
+        completed.stopReason,
+        { project, threadId, model, usage: total() }
+      )
     } finally {
       clearInterval(timer)
     }

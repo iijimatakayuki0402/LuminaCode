@@ -114,9 +114,10 @@ export function ChatView({
       unwrap(window.lumina.chatPrefs.get()),
       cowork ? unwrap(window.lumina.cowork.toolEvents(threadId)) : Promise.resolve([]),
       unwrap(window.lumina.threads.get(threadId)),
-      unwrap(window.lumina.usage.context(threadId))
+      unwrap(window.lumina.usage.context(threadId)),
+      cowork ? unwrap(window.lumina.cowork.pendingPermissions(threadId)) : Promise.resolve([])
     ])
-      .then(([list, p, events, thread, ctx]) => {
+      .then(([list, p, events, thread, ctx, waiting]) => {
         if (!active) return
         if (cowork) {
           void unwrap(window.lumina.threads.get(threadId))
@@ -131,7 +132,11 @@ export function ChatView({
         setPrefs(p)
         setTools(events)
         setLive({})
-        setPermissions([])
+        // 読み込み中に届いた確認と、それ以前から回答待ちの確認をまとめて表示する
+        setPermissions((list) => [
+          ...waiting.filter((w) => !list.some((r) => r.requestId === w.requestId)),
+          ...list
+        ])
         setTodos([])
         stickToBottom.current = true
       })

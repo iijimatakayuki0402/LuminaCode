@@ -93,6 +93,22 @@ describe('全データのバックアップと復元（EXP-03）', () => {
     expect(applyPendingRestore(userData)).toEqual({ status: 'none' })
   })
 
+  it('入れ替えの途中で失敗したら、退避していないデータには触れずに元へ戻す', async () => {
+    const dir = await backupWith('バックアップ時点')
+    writeFileSync(join(userData, 'attachments', 'ab', 'file.bin'), 'changed')
+    // agent の退避だけが失敗するよう、退避先に同じ名前の空でないフォルダを置く
+    const previous = join(userData, 'backups', 'before-restore-20261003-120000')
+    mkdirSync(join(previous, 'agent'), { recursive: true })
+    writeFileSync(join(previous, 'agent', 'busy'), '')
+
+    scheduleRestore(userData, dir)
+    expect(applyPendingRestore(userData, NOW)).toMatchObject({ status: 'failed' })
+    expect(readFileSync(join(userData, 'attachments', 'ab', 'file.bin'), 'utf-8')).toBe('changed')
+    expect(readFileSync(join(userData, 'agent', 'session.jsonl'), 'utf-8')).toBe('session')
+    expect(existsSync(join(userData, 'pricing.json'))).toBe(true)
+    expect(existsSync(join(userData, 'lumina.db'))).toBe(true)
+  })
+
   it('バックアップでないフォルダ・新しいアプリのバックアップは復元できない', async () => {
     expect(() => inspectFullBackup(dest)).toThrow('バックアップではありません')
     const dir = await backupWith('A')

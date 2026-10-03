@@ -173,6 +173,7 @@ export function parseBundle(text: string): ProjectBundle {
   for (const t of threads)
     if (!isObject(t) || !str(t['id']) || !strOrNull(t['title'])) return fail()
   const threadIds = new Set(threads.map((t) => (t as BundleThread).id))
+  if (threadIds.size !== threads.length) return fail()
   for (const m of messages) {
     if (
       !isObject(m) ||
@@ -186,6 +187,7 @@ export function parseBundle(text: string): ProjectBundle {
       return fail()
     }
   }
+  if (new Set(messages.map((m) => (m as { id: string }).id)).size !== messages.length) return fail()
   for (const f of files) {
     if (!isObject(f) || !str(f['message_id']) || !str(f['filename']) || !str(f['data']))
       return fail()
@@ -208,6 +210,20 @@ export function previewBundle(bundle: ProjectBundle, token: string): ImportPrevi
 
 const STATUSES = new Set(['complete', 'stopped', 'error', 'interrupted'])
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+const PERMISSION_MODES = new Set(['confirm_each', 'auto_edit', 'plan_only'])
+
+/** 応答の内容ブロックは、ブロックの配列として読めるものだけ取り込む（壊れているとスレッドを開けなくなるため） */
+function validContentBlocks(value: unknown): string | null {
+  if (!str(value)) return null
+  try {
+    const blocks: unknown = JSON.parse(value)
+    return Array.isArray(blocks) && blocks.every((b) => isObject(b) && str(b['type']))
+      ? value
+      : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * 読み込む（EXP-01）。ID は振り直し、Cowork の作業フォルダは呼び出し側で検証したものを使う（EXP-05）
@@ -232,14 +248,18 @@ export function importBundle(
   }
 
   return db.transaction(() => {
+    // 返信が親より前に並んでいても読み込めるよう、外部キーの確認はトランザクションの終わりに行う
+    db.pragma('defer_foreign_keys = ON')
     const p = bundle.project
     const project = ops.createProject(db, {
       type: p.type,
       name: p.name,
       ...(p.custom_instructions ? { custom_instructions: p.custom_instructions } : {}),
       ...(p.type === 'cowork' && workFolder ? { work_folder: workFolder } : {}),
-      ...(p.model ? { model: p.model } : {}),
-      ...(p.permission_mode ? { permission_mode: p.permission_mode } : {})
+      ...(str(p.model) && p.model ? { model: p.model } : {}),
+      ...(p.permission_mode && PERMISSION_MODES.has(p.permission_mode)
+        ? { permission_mode: p.permission_mode }
+        : {})
     })
 
     const insertThread = db.prepare(
@@ -252,9 +272,9 @@ export function importBundle(
         idFor(t.id),
         project.id,
         t.title,
-        t.model ?? null,
+        str(t.model) ? t.model : null,
         t.effort && EFFORTS.has(t.effort) ? t.effort : null,
-        t.context_summary ?? null,
+        str(t.context_summary) ? t.context_summary : null,
         t.extended_thinking === 0 ? 0 : 1,
         num(t.created_at) ? t.created_at : Date.now(),
         num(t.updated_at) ? t.updated_at : Date.now()
@@ -274,11 +294,11 @@ export function importBundle(
         m.parent_id && known.has(m.parent_id) ? idFor(m.parent_id) : null,
         m.role,
         m.content,
-        typeof m.content_blocks === 'string' ? m.content_blocks : null,
+        validContentBlocks(m.content_blocks),
         // 生成中のまま書き出されたものは中断として扱う
         STATUSES.has(m.status) ? m.status : 'interrupted',
-        m.model ?? null,
-        m.stop_reason ?? null,
+        str(m.model) ? m.model : null,
+        str(m.stop_reason) ? m.stop_reason : null,
         null,
         num(m.tokens_used) ? m.tokens_used : null,
         num(m.estimated_cost) ? m.estimated_cost : null,

@@ -111,6 +111,12 @@ describe('スラッシュコマンド（6.6）', () => {
     expect(expandCommand(commands[0].content, '5')).toBe('直近 5 件の履歴')
     expect(listSlashCommands(join(base, 'none'))).toEqual([])
   })
+
+  it('引数に含まれる $ は置き換えない', () => {
+    expect(expandCommand('Say: $ARGUMENTS / $1', 'price is $5 $&')).toBe(
+      'Say: price is $5 $& / price'
+    )
+  })
 })
 
 describe('スキル（6.6: 信頼の確認を経て有効にする）', () => {

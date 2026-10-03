@@ -85,27 +85,43 @@ export function moveToTrash(workRoot: string, paths: string[], now = new Date())
     }
   }
 
+  // フォルダと、その中のファイルを同時に指定された場合は、フォルダごと退避する
+  const key = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p)
+  const outermost = targets.filter(
+    (t) => !targets.some((other) => other !== t && key(t).startsWith(key(other) + sep))
+  )
+
   const stamp = stampOf(now)
   const stampDir = join(root, TRASH_DIR, stamp)
   const moved: TrashedItem[] = []
-  for (const target of targets) {
-    const rel = relative(root, target)
-    const destination = join(stampDir, rel)
-    const isFolder = statSync(target).isDirectory()
-    const size = sizeOf(target)
-    mkdirSync(dirname(destination), { recursive: true })
-    renameSync(target, destination)
-    moved.push({ originalPath: target, trashPath: destination, isFolder, size_bytes: size })
+  try {
+    for (const target of outermost) {
+      const rel = relative(root, target)
+      const destination = join(stampDir, rel)
+      const isFolder = statSync(target).isDirectory()
+      const size = sizeOf(target)
+      mkdirSync(dirname(destination), { recursive: true })
+      renameSync(target, destination)
+      moved.push({ originalPath: target, trashPath: destination, isFolder, size_bytes: size })
+    }
+  } finally {
+    // 途中で失敗しても、退避済みのものは一覧から戻せるよう記録する。
+    // 同じ時刻の退避が重なった場合は、先の記録に追加する
+    if (moved.length > 0) {
+      const manifest: Manifest = {
+        deletedAt: now.getTime(),
+        items: [
+          ...(readManifest(stampDir)?.items ?? []),
+          ...moved.map((m) => ({
+            path: relative(root, m.originalPath),
+            isFolder: m.isFolder,
+            size_bytes: m.size_bytes
+          }))
+        ]
+      }
+      writeFileSync(join(stampDir, MANIFEST), JSON.stringify(manifest, null, 1))
+    }
   }
-  const manifest: Manifest = {
-    deletedAt: now.getTime(),
-    items: moved.map((m) => ({
-      path: relative(root, m.originalPath),
-      isFolder: m.isFolder,
-      size_bytes: m.size_bytes
-    }))
-  }
-  writeFileSync(join(stampDir, MANIFEST), JSON.stringify(manifest, null, 1))
   return moved
 }
 
@@ -156,6 +172,8 @@ export function restoreFromTrash(workRoot: string, entryId: string): string {
   }
   const [stamp, ...rest] = relative(trash, source).split(sep)
   const relPath = rest.join(sep)
+  if (relPath === '' || relPath === MANIFEST)
+    throw new ValidationError('退避したファイルが見つかりません。')
   const destination = join(root, relPath)
   if (existsSync(destination)) {
     throw new ValidationError(`元の場所に同じ名前のファイルがあるため復元できません: ${relPath}`)

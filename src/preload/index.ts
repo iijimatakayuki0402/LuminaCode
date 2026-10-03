@@ -109,6 +109,7 @@ const api: LuminaApi = {
   cowork: {
     respond: invoke('cowork:respond'),
     toolEvents: invoke('cowork:toolEvents'),
+    pendingPermissions: invoke('cowork:pendingPermissions'),
     folders: invoke('cowork:folders'),
     addFolder: invoke('cowork:addFolder'),
     setFolderAccess: invoke('cowork:setFolderAccess'),

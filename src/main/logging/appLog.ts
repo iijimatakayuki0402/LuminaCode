@@ -15,7 +15,10 @@ export const LOG_GENERATIONS = 3
 export function redact(text: string): string {
   return text
     .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, 'sk-ant-***')
-    .replace(/(x-api-key|authorization|api[_-]?key)(["':=\s]+)([^\s"',}]+)/gi, '$1$2***')
+    .replace(
+      /(x-api-key|authorization|api[_-]?key)(["':=\s]+)((?:Bearer\s+)?[^\s"',}]+)/gi,
+      '$1$2***'
+    )
 }
 
 function rotate(file: string): void {

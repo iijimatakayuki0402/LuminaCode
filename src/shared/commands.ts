@@ -5,9 +5,10 @@
 export function expandCommand(content: string, args: string): string {
   const trimmed = args.trim()
   const parts = trimmed ? trimmed.split(/\s+/) : []
-  return content
-    .replace(/\$ARGUMENTS/g, trimmed)
-    .replace(/\$([1-9])/g, (_, n: string) => parts[Number(n) - 1] ?? '')
+  // 一度に置き換える（引数に含まれる $ が再び置き換えられないようにする）
+  return content.replace(/\$(ARGUMENTS|[1-9])/g, (_, key: string) =>
+    key === 'ARGUMENTS' ? trimmed : (parts[Number(key) - 1] ?? '')
+  )
 }
 
 /** 入力が「/名前 引数」の形なら分解する */

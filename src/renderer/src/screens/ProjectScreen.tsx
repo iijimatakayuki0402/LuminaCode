@@ -467,6 +467,7 @@ export function ProjectScreen({
                 )}
               </div>
               <ChatView
+                key={selected.id}
                 threadId={selected.id}
                 focusMessageId={focus?.threadId === selected.id ? focus.messageId : undefined}
                 cowork={project.type === 'cowork'}

@@ -151,24 +151,42 @@ export function applyPendingRestore(
   mkdirSync(previous, { recursive: true })
   const current = [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`, ...ITEMS]
   const moved: string[] = []
+  const copied: string[] = []
   try {
     for (const item of current) {
       if (!existsSync(join(userData, item))) continue
       renameSync(join(userData, item), join(previous, item))
       moved.push(item)
     }
+    copied.push(DB_FILE)
     cpSync(join(backupDir, DB_FILE), join(userData, DB_FILE))
     for (const item of ITEMS) {
       const src = join(backupDir, item)
-      if (existsSync(src)) cpSync(src, join(userData, item), { recursive: true })
+      if (!existsSync(src)) continue
+      copied.push(item)
+      cpSync(src, join(userData, item), { recursive: true })
     }
     return { status: 'restored', previous }
   } catch (error) {
-    // 途中で失敗したら、写したものを消して元に戻す
-    for (const item of [DB_FILE, ...ITEMS])
-      rmSync(join(userData, item), { recursive: true, force: true })
-    for (const item of moved) renameSync(join(previous, item), join(userData, item))
-    rmSync(previous, { recursive: true, force: true })
-    return { status: 'failed', error: (error as Error).message }
+    // 途中で失敗したら、写したものだけを消して元に戻す（退避していないものには触れない）
+    let rolledBack = true
+    for (const item of copied) rmSync(join(userData, item), { recursive: true, force: true })
+    for (const item of moved) {
+      try {
+        renameSync(join(previous, item), join(userData, item))
+      } catch {
+        rolledBack = false
+      }
+    }
+    // 戻せなかったものがあれば、退避先は消さずに残す
+    if (rolledBack) rmSync(previous, { recursive: true, force: true })
+    const message = (error as Error).message
+    return {
+      status: 'failed',
+      error: rolledBack
+        ? message
+        : `${message}
+元のデータの一部は次の場所に残っています: ${previous}`
+    }
   }
 }

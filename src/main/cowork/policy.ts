@@ -4,6 +4,7 @@
  * ここでの判定が最終判断となる（SDK の権限ルールやプロジェクトの設定では緩められない）。
  */
 
+import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
 import type { PermissionMode, ToolCategory } from '@shared/types'
 import { isInsideWorkFolder } from '../security/pathGuard'
@@ -156,11 +157,27 @@ export const DEFAULT_COMMAND_DENY_PATTERNS: string[] = [
 /** コマンドによる削除（SEC-10: 削除は退避ツールで行う） */
 const DELETE_COMMAND = String.raw`(^|[\s;&|(])(rm|rmdir|del|erase|rd|Remove-Item|ri|unlink|shred)(\s|$)`
 
-/** 作業フォルダ外の絶対パスを明示しているか（SEC-22） */
+/** 作業フォルダ外のパスを明示しているか（SEC-22） */
 function referencesOutside(command: string, roots: string[]): string | undefined {
-  const candidates = command.match(/(?:[A-Za-z]:[\\/][^\s"'`|;&<>]*|\\\\[^\s"'`|;&<>]+)/g) ?? []
+  const candidates = [
+    // 絶対パス（URL の「https://」を拾わないよう、英数字の直後は除く）と UNC パス
+    ...(command.match(/(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'`|;&<>]*|\\\\[^\s"'`|;&<>]+/g) ?? []),
+    // 親フォルダをたどる相対パス（作業フォルダを起点に判定する）
+    ...(command.match(/(?<![^\s"'=(])\.\.(?=$|[\\/\s"'`|;&<>)])[^\s"'`|;&<>)]*/g) ?? []),
+    // Git Bash 形式のドライブ（/c/Users/...。「cmd /c」などのオプションは除く）
+    ...(command.match(/(?<![^\s"'=(])\/[A-Za-z]\/[^\s"'`|;&<>)]*/g) ?? []).map(
+      (p) => `${p[1]}:\\${p.slice(3)}`
+    ),
+    // ホームフォルダ（~/...）
+    ...(command.match(/(?<![^\s"'=(])~(?=$|[\\/\s"'`|;&<>)])[^\s"'`|;&<>)]*/g) ?? []).map(
+      (p) => homedir() + p.slice(1)
+    )
+  ]
   return candidates.find((p) => !roots.some((root) => isInsideWorkFolder(root, p)))
 }
+
+/** コマンドの連結・置換・リダイレクト（前方一致の許可では、後ろに別のコマンドを続けられるため認めない） */
+const SHELL_CHAINING = /[;&|<>`\r\n]|\$\(/
 
 export interface CommandRules {
   denyPatterns: string[]
@@ -196,7 +213,9 @@ export function checkCommand(
     return { verdict: 'deny', reason: `作業フォルダ外のパスを含むコマンドです: ${outside}` }
   if (new RegExp(DELETE_COMMAND, 'i').test(text)) return { verdict: 'delete' }
   const allowed = rules.allowCommands.some((rule) =>
-    rule.endsWith('*') ? text.startsWith(rule.slice(0, -1)) : text === rule
+    rule.endsWith('*')
+      ? !SHELL_CHAINING.test(text) && text.startsWith(rule.slice(0, -1))
+      : text === rule
   )
   return allowed ? { verdict: 'allowlisted' } : { verdict: 'ask' }
 }

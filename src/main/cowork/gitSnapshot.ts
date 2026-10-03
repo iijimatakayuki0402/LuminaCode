@@ -23,11 +23,19 @@ export type GitRunner = (
   options: { cwd: string; env?: Record<string, string> }
 ) => Promise<string>
 
+// 記録の操作でリポジトリのフック・fsmonitor（任意のプログラム）が動かないようにする
+const SAFE_CONFIG = [
+  '-c',
+  `core.hooksPath=${join(tmpdir(), 'lumina-code-no-git-hooks')}`,
+  '-c',
+  'core.fsmonitor=false'
+]
+
 export const runGit: GitRunner = (args, options) =>
   new Promise((resolve, reject) => {
     execFile(
       'git',
-      args,
+      [...SAFE_CONFIG, ...args],
       {
         cwd: options.cwd,
         env: { ...process.env, ...options.env },

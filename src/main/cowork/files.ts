@@ -3,7 +3,15 @@
  * 対象は作業フォルダの中に限る（SEC-01〜02 と同じ境界の判定を通す）。リンクはたどらない。
  */
 
-import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync
+} from 'node:fs'
 import { extname, join, relative, resolve } from 'node:path'
 import type { FileEntry, FilePreview } from '@shared/types'
 import { ValidationError } from '../db/operations'
@@ -81,7 +89,16 @@ export function readPreview(workRoot: string, relPath: string): FilePreview {
       truncated: false
     }
   }
-  const bytes = readFileSync(file).subarray(0, MAX_TEXT_BYTES)
+  // 大きなファイルでも先頭だけを読む
+  const buffer = Buffer.alloc(Math.min(stat.size, MAX_TEXT_BYTES))
+  const fd = openSync(file, 'r')
+  let length: number
+  try {
+    length = readSync(fd, buffer, 0, buffer.length, 0)
+  } finally {
+    closeSync(fd)
+  }
+  const bytes = buffer.subarray(0, length)
   // 先頭に NUL を含むものはバイナリとみなす
   if (bytes.subarray(0, 8000).includes(0)) {
     return { path, kind: 'unsupported', size_bytes: stat.size, truncated: false }

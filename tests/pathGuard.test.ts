@@ -80,4 +80,9 @@ describe('isInsideWorkFolder', () => {
     expect(isInsideWorkFolder(work, 'a.txt:stream')).toBe(false)
     expect(isInsideWorkFolder(work, 'a\0.txt')).toBe(false)
   })
+
+  it('リンク先がまだ無いジャンクションは、リンク先で判定する', () => {
+    symlinkSync(join(outside, 'not-yet'), join(work, 'dangling'), 'junction')
+    expect(isInsideWorkFolder(work, join('dangling', 'new.txt'))).toBe(false)
+  })
 })

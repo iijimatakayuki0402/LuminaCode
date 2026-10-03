@@ -2,7 +2,16 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, Notification, safeStorage, screen, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Notification,
+  safeStorage,
+  screen,
+  session,
+  shell
+} from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { CHAT_EVENT_CHANNEL, UPDATE_EVENT_CHANNEL } from '@shared/ipc'
 import type { ChatEvent, LicenseList } from '@shared/types'
@@ -85,8 +94,9 @@ function createWindow(): void {
   })
 
   // 外部リンクは既定ブラウザで開く
+  // （file: などを開くとローカルのプログラムが起動しうるため、http(s)・mailto 以外は開かない）
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    if (isExternalLinkUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
 
@@ -409,7 +419,31 @@ function setupBackend(): boolean {
   return true
 }
 
+/** 既定ブラウザ等で開いてよいリンクか */
+function isExternalLinkUrl(url: string): boolean {
+  try {
+    return ['https:', 'http:', 'mailto:'].includes(new URL(url).protocol)
+  } catch {
+    return false
+  }
+}
+
+// 同じデータを 2 つのプロセスで扱わないよう、2 つ目の起動では既存のウィンドウを前面に出して終了する
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) app.quit()
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.focus()
+})
+
 void app.whenReady().then(() => {
+  if (!isPrimaryInstance) return
+  // 画面から要求される権限は、コピーボタンが使うクリップボードへの書き込みだけ許可する
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) =>
+    callback(permission === 'clipboard-sanitized-write')
+  )
   if (!setupBackend()) {
     app.quit()
     return

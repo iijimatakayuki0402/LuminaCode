@@ -318,6 +318,8 @@ export function createHandlers({
         v.permissionResponse(response, 'response')
       ),
     'cowork:toolEvents': (threadId) => coworkService.listToolEvents(v.id(threadId, 'threadId')),
+    'cowork:pendingPermissions': (threadId) =>
+      coworkService.pendingRequests(v.id(threadId, 'threadId')),
     'cowork:changes': (messageId) => coworkService.listChanges(v.id(messageId, 'messageId')),
     'cowork:undo': (messageId) => coworkService.undo(v.id(messageId, 'messageId')),
     'cowork:diff': (snapshotId) => coworkService.diff(v.id(snapshotId, 'snapshotId')),

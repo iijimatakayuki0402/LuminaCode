@@ -169,6 +169,7 @@ export interface CoworkServiceDeps {
 
 interface Pending {
   threadId: string
+  request: PermissionRequest
   resolve: (response: PermissionResponse) => void
 }
 
@@ -347,6 +348,11 @@ export class CoworkService {
     if (!p) throw new ValidationError('確認の依頼が見つかりません（すでに終了しています）。')
     this.pending.delete(requestId)
     p.resolve(response)
+  }
+
+  /** 回答待ちの確認（画面を開き直したときに表示し直すため） */
+  pendingRequests(threadId: string): PermissionRequest[] {
+    return [...this.pending.values()].filter((p) => p.threadId === threadId).map((p) => p.request)
   }
 
   isGenerating(threadId: string): boolean {
@@ -701,9 +707,12 @@ export class CoworkService {
 
     const preToolUse = async (
       input: HookInput,
-      toolUseId: string | undefined
+      toolUseId: string | undefined,
+      options?: { signal: AbortSignal }
     ): Promise<HookJSONOutput> => {
       if (input.hook_event_name !== 'PreToolUse') return { continue: true }
+      // SDK 側でフックが打ち切られた場合も、確認を閉じる
+      const hookSignal = options?.signal ? AbortSignal.any([signal, options.signal]) : signal
       const verdict = await this.judge(
         project,
         threadId,
@@ -712,7 +721,7 @@ export class CoworkService {
         input.tool_name,
         input.tool_input,
         toolUseId ?? input.tool_use_id,
-        signal,
+        hookSignal,
         recorded,
         input.agent_id ?? null,
         webAccess,
@@ -1026,10 +1035,18 @@ export class CoworkService {
   private ask(request: PermissionRequest, signal: AbortSignal): Promise<PermissionResponse> {
     if (signal.aborted) return Promise.resolve('deny')
     return new Promise((resolve) => {
-      this.pending.set(request.requestId, { threadId: request.threadId, resolve })
-      signal.addEventListener('abort', () => {
+      const onAbort = (): void => {
         if (this.pending.delete(request.requestId)) resolve('deny')
+      }
+      this.pending.set(request.requestId, {
+        threadId: request.threadId,
+        request,
+        resolve: (response) => {
+          signal.removeEventListener('abort', onAbort)
+          resolve(response)
+        }
       })
+      signal.addEventListener('abort', onAbort, { once: true })
       this.deps.emit({ type: 'permission', threadId: request.threadId, request })
     })
   }

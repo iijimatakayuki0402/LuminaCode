@@ -75,3 +75,26 @@ describe('退避（SEC-10、SEC-11）', () => {
     expect(listTrash(work).map((e) => e.originalPath)).toEqual(['src'])
   })
 })
+
+describe('退避の補強', () => {
+  it('フォルダと中のファイルを同時に指定しても、フォルダごと退避して一覧に残す', () => {
+    moveToTrash(work, ['src', join('src', 'deep', 'a.ts')])
+    expect(listTrash(work).map((e) => e.originalPath)).toEqual(['src'])
+  })
+
+  it('同じ時刻の退避が重なっても、先に退避したものを一覧から失わない', () => {
+    const at = new Date(2026, 9, 2, 13, 4, 5, 6)
+    moveToTrash(work, ['b.txt'], at)
+    moveToTrash(work, ['src'], at)
+    expect(
+      listTrash(work)
+        .map((e) => e.originalPath)
+        .sort()
+    ).toEqual(['b.txt', 'src'])
+  })
+
+  it('退避の記録ファイル自体は復元できない', () => {
+    moveToTrash(work, ['b.txt'], new Date(2026, 9, 2, 13, 4, 5, 6))
+    expect(() => restoreFromTrash(work, join('20261002-130405-006', '.manifest.json'))).toThrow()
+  })
+})

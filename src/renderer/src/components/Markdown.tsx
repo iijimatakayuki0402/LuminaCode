@@ -46,8 +46,10 @@ const components: Components = {
       </div>
     )
   },
-  // リンクは既定ブラウザで開く（main の setWindowOpenHandler が処理する）
+  // リンクは既定ブラウザで開く（main の setWindowOpenHandler が処理する）。
+  // 相対パスは file: として解決されローカルのファイルを開きうるため、http(s)・mailto 以外はリンクにしない
   a({ href, children }) {
+    if (!href || !/^(https?:|mailto:)/i.test(href)) return <>{children}</>
     return (
       <a href={href} target="_blank" rel="noreferrer">
         {children}

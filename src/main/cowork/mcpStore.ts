@@ -57,13 +57,26 @@ export class McpStore {
 
   /** 保存済みのサーバー（main 内でのみ使う。値を含む） */
   list(projectId: string): McpServer[] {
-    const raw = getSetting(this.db, KEY(projectId))
-    if (!raw) return []
     try {
-      return JSON.parse(this.cipher.decryptString(Buffer.from(raw, 'base64'))) as McpServer[]
+      return this.stored(projectId)
     } catch (error) {
       console.warn('[mcp] failed to decrypt settings:', (error as Error).name)
       return []
+    }
+  }
+
+  /** 保存済みのサーバー。読めない場合は例外（変更時に、読めなかった設定を消してしまわないように） */
+  private stored(projectId: string): McpServer[] {
+    const raw = getSetting(this.db, KEY(projectId))
+    if (!raw) return []
+    return JSON.parse(this.cipher.decryptString(Buffer.from(raw, 'base64'))) as McpServer[]
+  }
+
+  private storedForUpdate(projectId: string): McpServer[] {
+    try {
+      return this.stored(projectId)
+    } catch {
+      throw new ValidationError('保存済みの MCP サーバーの設定を読み取れないため、変更できません。')
     }
   }
 
@@ -91,7 +104,7 @@ export class McpStore {
   /** 追加・置き換え（画面で信頼の確認を経てから呼ぶ） */
   upsert(projectId: string, server: McpServer): McpServerSummary[] {
     const checked = validateServer(server)
-    const servers = this.list(projectId).filter((s) => s.name !== checked.name)
+    const servers = this.storedForUpdate(projectId).filter((s) => s.name !== checked.name)
     this.save(projectId, [...servers, checked])
     return this.summaries(projectId)
   }
@@ -99,7 +112,7 @@ export class McpStore {
   remove(projectId: string, name: string): McpServerSummary[] {
     this.save(
       projectId,
-      this.list(projectId).filter((s) => s.name !== name)
+      this.storedForUpdate(projectId).filter((s) => s.name !== name)
     )
     return this.summaries(projectId)
   }

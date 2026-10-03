@@ -31,8 +31,10 @@ function buildTree<T extends ConversationNode>(nodes: T[]): Tree<T> {
 /** 指定した位置の子孫を、各階層で最も新しい子を辿って返す */
 function descend<T extends ConversationNode>(tree: Tree<T>, fromId: string | null): T[] {
   const result: T[] = []
+  const seen = new Set<string>()
   let current = tree.children.get(fromId)?.at(-1)
-  while (current) {
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id)
     result.push(current)
     current = tree.children.get(current.id)?.at(-1)
   }

@@ -27,6 +27,7 @@ export function isTrustedSenderUrl(senderUrl: string | undefined, trusted: Trust
   const expected = new URL(trusted.rendererFileUrl)
   return (
     url.protocol === 'file:' &&
+    url.host === expected.host &&
     decodeURIComponent(url.pathname).toLowerCase() ===
       decodeURIComponent(expected.pathname).toLowerCase()
   )

@@ -271,3 +271,26 @@ describe('追加のフォルダ（COW-12）', () => {
     })
   })
 })
+
+describe('コマンドの判定の補強', () => {
+  it('URL を作業フォルダ外のパスとみなさない', () => {
+    expect(checkCommand('git clone https://example.com/a/b.git', work, rules)).toEqual({
+      verdict: 'ask'
+    })
+  })
+
+  it('親フォルダ・ホームフォルダ・Git Bash 形式のドライブを外部のパスとして拒否する', () => {
+    for (const command of ['cat ../secret.txt', 'cd .. && ls', 'ls ~/.ssh', 'cat /c/Users/x']) {
+      expect(checkCommand(command, work, rules)).toMatchObject({ verdict: 'deny' })
+    }
+    expect(checkCommand('cat src/../a.txt', work, rules)).toEqual({ verdict: 'ask' })
+    expect(checkCommand('cmd /c echo hi', work, rules)).toEqual({ verdict: 'ask' })
+  })
+
+  it('前方一致の許可は、連結されたコマンドには使わない', () => {
+    expect(checkCommand('npm test -- --run', work, rules)).toEqual({ verdict: 'allowlisted' })
+    for (const command of ['npm test & calc', 'npm test; calc', 'npm test | sh', 'npm test $(x)']) {
+      expect(checkCommand(command, work, rules)).toEqual({ verdict: 'ask' })
+    }
+  })
+})

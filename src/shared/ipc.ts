@@ -31,6 +31,7 @@ import type {
   ListProjectsOptions,
   Message,
   ModelList,
+  PermissionRequest,
   PermissionResponse,
   Project,
   SendMessageInput,
@@ -150,6 +151,8 @@ export interface IpcContract {
   /** Cowork: 確認ダイアログへの回答 */
   'cowork:respond': { args: [requestId: string, response: PermissionResponse]; result: void }
   'cowork:toolEvents': { args: [threadId: string]; result: ToolEventInfo[] }
+  /** Cowork: 回答待ちの確認（スレッドを開き直したときに表示し直す） */
+  'cowork:pendingPermissions': { args: [threadId: string]; result: PermissionRequest[] }
   /** 追加の作業フォルダ（COW-12）。変更は更新後の一覧を返す */
   'cowork:folders': { args: [projectId: string]; result: CoworkFolder[] }
   'cowork:addFolder': {
@@ -371,6 +374,7 @@ export interface LuminaApi {
   cowork: {
     respond: Invoke<'cowork:respond'>
     toolEvents: Invoke<'cowork:toolEvents'>
+    pendingPermissions: Invoke<'cowork:pendingPermissions'>
     folders: Invoke<'cowork:folders'>
     addFolder: Invoke<'cowork:addFolder'>
     setFolderAccess: Invoke<'cowork:setFolderAccess'>
