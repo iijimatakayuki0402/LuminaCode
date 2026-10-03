@@ -8,13 +8,20 @@ import type Database from 'better-sqlite3'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type {
+  CacheEffect,
   ProjectUsage,
   UsageLimits,
   UsageStatus,
   UsageSummary,
   UsageTotals
 } from '@shared/types'
-import { DEFAULT_PRICES, estimateCost, type ModelPrice, type TokenUsage } from '../chat/pricing'
+import {
+  DEFAULT_PRICES,
+  estimateCost,
+  findPrice,
+  type ModelPrice,
+  type TokenUsage
+} from '../chat/pricing'
 import { deleteSetting, getSetting, setSetting, ValidationError } from '../db/operations'
 import { toCsv } from '../data/csv'
 
@@ -115,6 +122,11 @@ export class UsageService {
 
   estimate(model: string, usage: TokenUsage): number | null {
     return estimateCost(model, usage, this.prices())
+  }
+
+  /** モデルの単価（USD / 100 万トークン）。不明なら null */
+  priceOf(model: string): ModelPrice | null {
+    return findPrice(model, this.prices())
   }
 
   get pricingFile(): string {
@@ -285,6 +297,41 @@ export class UsageService {
     )
   }
 
+  /**
+   * プロンプトキャッシュの効果（USG-07）
+   * 節約額 = 読み込み × (入力単価 − 読み込み単価) − 書き込み × (書き込み単価 − 入力単価)。単価はモデルごと
+   */
+  cacheEffect(from: number, to: number): CacheEffect {
+    const rows = this.db
+      .prepare(
+        `SELECT model, COALESCE(SUM(input_tokens), 0) AS input,
+           COALESCE(SUM(cache_read_tokens), 0) AS read, COALESCE(SUM(cache_write_tokens), 0) AS write
+         FROM usage_records WHERE created_at >= ? AND created_at < ? GROUP BY model`
+      )
+      .all(from, to) as { model: string; input: number; read: number; write: number }[]
+    let saved = 0
+    let input = 0
+    let read = 0
+    let write = 0
+    for (const r of rows) {
+      input += r.input
+      read += r.read
+      write += r.write
+      const price = this.priceOf(r.model)
+      if (!price) continue // 単価が不明なモデルは金額に含めない（トークン数とヒット率には含める）
+      saved +=
+        (r.read * (price.input - price.cacheRead) - r.write * (price.cacheWrite - price.input)) /
+        1_000_000
+    }
+    const all = input + read + write
+    return {
+      savedUsd: saved,
+      hitRate: all > 0 ? read / all : null,
+      readTokens: read,
+      writeTokens: write
+    }
+  }
+
   summary(month = monthOf(this.now())): UsageSummary {
     const { from, to } = monthRange(month)
     const months = this.db
@@ -312,6 +359,7 @@ export class UsageService {
       month,
       projectLimits,
       total: this.totals('created_at >= ? AND created_at < ?', [from, to]),
+      cache: this.cacheEffect(from, to),
       months: months.map(({ month: m, ...totals }) => ({ month: m, totals })),
       projects: projects.map(({ project_id, project_name, ...totals }): ProjectUsage => ({
         project_id,

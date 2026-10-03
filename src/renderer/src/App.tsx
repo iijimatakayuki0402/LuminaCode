@@ -9,6 +9,7 @@ import { DashboardScreen } from './screens/DashboardScreen'
 import { OperationLogScreen } from './screens/OperationLogScreen'
 import { UsageScreen } from './screens/UsageScreen'
 import { SearchScreen } from './screens/SearchScreen'
+import { BookmarksScreen } from './screens/BookmarksScreen'
 import { ProjectScreen } from './screens/ProjectScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupScreen } from './screens/SetupScreen'
@@ -24,6 +25,8 @@ type Screen =
   | { name: 'project'; project: Project; focus?: { threadId: string; messageId: string } }
   /** focus: Ctrl+K で開き直したときに検索欄へフォーカスを戻す */
   | { name: 'search'; focus?: number }
+  /** BMK-02: ブックマークの一覧 */
+  | { name: 'bookmarks' }
 
 export default function App(): React.JSX.Element {
   const [status, setStatus] = useState<ApiKeyStatus | null>(null)
@@ -139,6 +142,11 @@ export default function App(): React.JSX.Element {
               {ja.search.nav}
             </button>
           )}
+          {screen.name !== 'bookmarks' && (
+            <button className="btn" type="button" onClick={() => setScreen({ name: 'bookmarks' })}>
+              {ja.bookmarks.nav}
+            </button>
+          )}
           {screen.name !== 'usage' && (
             <button className="btn" type="button" onClick={() => setScreen({ name: 'usage' })}>
               {ja.usage.nav}
@@ -184,6 +192,25 @@ export default function App(): React.JSX.Element {
                 name: 'project',
                 project,
                 focus: { threadId: hit.thread_id, messageId: hit.message_id }
+              })
+            )
+          }}
+        />
+      )}
+      {screen.name === 'bookmarks' && (
+        <BookmarksScreen
+          onOpen={(bookmark) => {
+            // KEY-01: API キーが未設定の間はチャット・Cowork の画面を開かない
+            if (!status.configured) {
+              setScreen({ name: 'settings' })
+              return
+            }
+            // BMK-03: スレッドの該当メッセージへ移動する（SRC-01 と同じ）
+            void unwrap(window.lumina.projects.get(bookmark.project_id)).then((project) =>
+              setScreen({
+                name: 'project',
+                project,
+                focus: { threadId: bookmark.thread_id, messageId: bookmark.message_id }
               })
             )
           }}

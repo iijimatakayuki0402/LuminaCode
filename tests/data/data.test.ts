@@ -145,6 +145,26 @@ describe('書き出し・読み込み（EXP-01、EXP-04、EXP-05）', () => {
     expect(ops.listThreadsByProject(db, old.id)[0].extended_thinking).toBe(true)
   })
 
+  it('色ラベル・タグ・ブックマークを保ち、項目が無い古いファイルも読み込む（THR-06、BMK-01）', () => {
+    const { projectId } = seed()
+    const [thread] = ops.listThreadsByProject(db, projectId)
+    ops.updateThread(db, thread.id, { color: 'green', tags: ['旅行'] })
+    const answer = ops.listMessagesByThread(db, thread.id).find((m) => m.role === 'assistant')!
+    ops.setBookmark(db, answer.id, true)
+    const bundle = exportProject(db, attachments, projectId)
+    const copy = importBundle(db, attachments, bundle, null)
+    const [copied] = ops.listThreadsByProject(db, copy.id)
+    expect(copied).toMatchObject({ color: 'green', tags: ['旅行'] })
+    expect(ops.listBookmarks(db, copy.id)).toHaveLength(1)
+
+    bundle.threads[0].color = 'gold'
+    bundle.threads[0].tags = '{壊れた'
+    delete bundle.messages.find((m) => m.id === answer.id)!.bookmarked_at
+    const old = importBundle(db, attachments, bundle, null)
+    expect(ops.listThreadsByProject(db, old.id)[0]).toMatchObject({ color: null, tags: [] })
+    expect(ops.listBookmarks(db, old.id)).toHaveLength(0)
+  })
+
   it('Cowork は作業フォルダを再指定しないと読み込めない', () => {
     const project = ops.createProject(db, { type: 'cowork', name: 'C', work_folder: dir })
     const bundle = exportProject(db, attachments, project.id)

@@ -32,7 +32,7 @@ import { combineInstructions } from '../settings/instructions'
 import type { TitleGenerator } from './titleGenerator'
 import type { UsageService } from '../usage/usageService'
 import { ATTACHMENT_LIMITS, kindOfMime, toContentBlock, type AttachmentStore } from './attachments'
-import { estimateCost, type TokenUsage } from './pricing'
+import { estimateCost, WEB_SEARCH_USD, type ModelPrice, type TokenUsage } from './pricing'
 import {
   isThinkingConfigError,
   offCandidates,
@@ -41,6 +41,16 @@ import {
   thinkingParams,
   type ThinkingMode
 } from './thinking'
+import {
+  echoBlocks,
+  FALLBACK_BETA,
+  fallbackOf,
+  isFallbackConfigError,
+  rememberFallbackUnsupported,
+  splitUsage,
+  supportsFallback,
+  type ModelUsage
+} from './fallback'
 
 const { ValidationError } = ops
 
@@ -65,6 +75,10 @@ const SERVER_TOOL_BLOCKS = new Set([
   'text_editor_code_execution_tool_result'
 ])
 const TITLE_LENGTH = 40
+/** USG-04: 残りの予算で出せる出力がこれより少なければ送信しない */
+export const MIN_BUDGET_OUTPUT = 1024
+/** USG-04: 画像 1 枚の入力トークンの見込み（実際は大きさによる。多めに見積もる） */
+const IMAGE_TOKENS = 5000
 
 export interface ChatServiceDeps {
   db: Database.Database
@@ -79,8 +93,10 @@ export interface ChatServiceDeps {
   getGlobalInstructions?: () => string
   /** タイトルの自動生成（THR-03） */
   titles?: Pick<TitleGenerator, 'generate'>
+  /** CHT-16: 拒否されたときに別のモデルで回答し直すか（省略時はオン） */
+  isFallbackEnabled?: () => boolean
   /** 上限の確認と概算コスト（USG）。省略時は既定の単価表で計算し、上限は確認しない */
-  usage?: Pick<UsageService, 'check' | 'estimate'>
+  usage?: Pick<UsageService, 'check' | 'estimate' | 'priceOf' | 'contextOf'>
   /** テストで待ち時間を短縮するために差し替える */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   flushIntervalMs?: number
@@ -160,7 +176,7 @@ export class ChatService {
   }
 
   send(input: SendMessageInput): SendResult {
-    const { thread, project, model } = this.prepare(input.threadId)
+    const { thread, project, model, remainingUsd } = this.prepare(input.threadId)
     this.checkNewContent(input.content, input.attachmentIds.length)
     const parent = this.path(thread.id).at(-1) ?? null
 
@@ -171,15 +187,21 @@ export class ChatService {
     for (const record of committed) ops.insertAttachment(this.deps.db, record)
 
     if (thread.title === null) this.setTitle(thread.id, input.content)
-    const assistantMessage = this.startGeneration(project, thread.id, userMessage.id, model)
+    const assistantMessage = this.startGeneration(
+      project,
+      thread.id,
+      userMessage.id,
+      model,
+      remainingUsd
+    )
     return { userMessage: this.getPublic(userMessage.id), assistantMessage }
   }
 
   /** ユーザーメッセージに対する応答を作り直す（停止・エラー後の再試行、CHT-06 の再生成） */
   regenerate(userMessageId: string): Message {
     const user = this.userMessageInPath(userMessageId)
-    const { project, model } = this.prepare(user.thread_id)
-    return this.startGeneration(project, user.thread_id, user.id, model)
+    const { project, model, remainingUsd } = this.prepare(user.thread_id)
+    return this.startGeneration(project, user.thread_id, user.id, model, remainingUsd)
   }
 
   /**
@@ -188,7 +210,7 @@ export class ChatService {
    */
   editAndResend(input: EditAndResendInput): SendResult {
     const original = this.userMessageInPath(input.userMessageId)
-    const { project, model } = this.prepare(original.thread_id)
+    const { project, model, remainingUsd } = this.prepare(original.thread_id)
     const existing = this.attachmentsByMessage(original.thread_id).get(original.id) ?? []
     const kept = existing.filter((a) => input.keepAttachmentIds.includes(a.id))
     this.checkNewContent(input.content, kept.length + input.attachmentIds.length)
@@ -210,7 +232,8 @@ export class ChatService {
       project,
       original.thread_id,
       userMessage.id,
-      model
+      model,
+      remainingUsd
     )
     return { userMessage: this.getPublic(userMessage.id), assistantMessage }
   }
@@ -245,7 +268,13 @@ export class ChatService {
   // 送信前の確認
   // ========================================
 
-  private prepare(threadId: string): { thread: Thread; project: Project; model: string } {
+  private prepare(threadId: string): {
+    thread: Thread
+    project: Project
+    model: string
+    /** USG-04: 上限までの残り（USD）。上限が無い・警告のみなら null */
+    remainingUsd: number | null
+  } {
     if (this.deps.getApiKey() === null) {
       throw new ValidationError('API キーが設定されていません。設定画面で登録してください。')
     }
@@ -270,8 +299,8 @@ export class ChatService {
       )
     }
     // USG-04: 上限に達していれば停止する
-    this.deps.usage?.check(project.id)
-    return { thread, project, model }
+    const remainingUsd = this.deps.usage?.check(project.id).remainingUsd ?? null
+    return { thread, project, model, remainingUsd }
   }
 
   private checkNewContent(content: string, attachmentCount: number): void {
@@ -345,7 +374,8 @@ export class ChatService {
     project: Project,
     threadId: string,
     userMessageId: string,
-    model: string
+    model: string,
+    remainingUsd: number | null
   ): Message {
     const assistant = ops.createMessage(this.deps.db, {
       thread_id: threadId,
@@ -359,13 +389,20 @@ export class ChatService {
     ops.updateThread(this.deps.db, threadId, { active_leaf_id: assistant.id })
     const controller = new AbortController()
     const entry = { controller, done: Promise.resolve() }
-    entry.done = this.generate(project, threadId, assistant.id, model, controller.signal)
+    entry.done = this.generate(
+      project,
+      threadId,
+      assistant.id,
+      model,
+      remainingUsd,
+      controller.signal
+    )
       .catch((error) => {
         console.error('[chat] unexpected failure:', (error as Error).name)
         // 生成中のまま残らないよう、エラーとして閉じる
         try {
           if (ops.getMessage(this.deps.db, assistant.id)?.status === 'streaming') {
-            this.finish(assistant.id, 'error', '', null, 'unknown', null)
+            this.finish(assistant.id, 'error', '', null, 'unknown', null, null)
           }
         } catch (inner) {
           console.error('[chat] failed to close the reply:', (inner as Error).name)
@@ -401,7 +438,10 @@ export class ChatService {
         if (m.content.trim() !== '') blocks.push({ type: 'text', text: m.content })
         messages.push({ role: 'user', content: blocks })
       } else if (m.status === 'complete' && m.content_blocks) {
-        const blocks = JSON.parse(m.content_blocks) as Anthropic.Beta.BetaContentBlockParam[]
+        // CHT-16: フォールバックした回答は、送り返せる形に整える（fallback.ts）
+        const blocks = echoBlocks(
+          JSON.parse(m.content_blocks) as Anthropic.Beta.BetaContentBlockParam[]
+        )
         // CHT-11: ツールを渡さないリクエストでは、検索を含む回答を本文だけにして送る
         if (!keepServerTools && blocks.some((b) => SERVER_TOOL_BLOCKS.has(b.type))) {
           // 検索結果が無いと「調べていない」と誤解されるため、もとにしたことを書き添える
@@ -429,19 +469,22 @@ export class ChatService {
     threadId: string,
     assistantId: string,
     model: string,
-    signal: AbortSignal
+    remainingUsd: number | null,
+    stopSignal: AbortSignal
   ): Promise<void> {
-    const { emit } = this.deps
+    const { emit, db } = this.deps
     const info = this.deps.modelService.getModelInfo(model)
-    const thread = ops.getThread(this.deps.db, threadId)
+    const thread = ops.getThread(db, threadId)
     // CHT-07: 思考量（モデルが対応している場合のみ指定する）
     const effort =
       thread?.effort && info?.effort_levels.includes(thread.effort) ? thread.effort : null
     // CHT-07: 拡張思考。オフにしたスレッドでは、モデルが受け付ける「止める指定」を順に試す（thinking.ts）
     const supportsThinking = info?.supports_adaptive_thinking ?? false
     const wantsOff = supportsThinking && thread?.extended_thinking === false
-    const offModes = wantsOff ? offCandidates(this.deps.db, model, effort) : []
+    const offModes = wantsOff ? offCandidates(db, model, effort) : []
     let mode: ThinkingMode = !supportsThinking ? 'none' : (offModes[0] ?? 'on')
+    // CHT-16: 拒否されたら別のモデルで回答し直す（受け付けないモデルには指定しない。fallback.ts）
+    let useFallback = (this.deps.isFallbackEnabled?.() ?? true) && supportsFallback(db, model)
     // CHT-11: Web 検索（プロジェクトでオンにした場合のみ。新しいモデルは結果の絞り込みに対応した版を使う）
     const webSearch = this.deps.isWebSearchEnabled?.(project.id) ?? false
     const webTool: Anthropic.Beta.BetaToolUnion = supportsThinking
@@ -455,6 +498,22 @@ export class ChatService {
       project.custom_instructions,
       thread?.context_summary
     )
+
+    // USG-04: 生成中に上限を超えたら中断する（停止ボタンによる停止と区別するため、別の信号で止める）
+    const controller = new AbortController()
+    const signal = controller.signal
+    const relayStop = (): void => controller.abort()
+    if (stopSignal.aborted) relayStop()
+    else stopSignal.addEventListener('abort', relayStop, { once: true })
+    let budgetHit = false
+    /** 確定した使用量（pause_turn で続ける前の応答と、フォールバックの各試行） */
+    const billed: ModelUsage[] = []
+    const billedCost = (): number =>
+      billed.reduce((sum, e) => sum + (this.estimate(e.model, e.usage) ?? 0), 0)
+    const modelMax = Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS)
+    /** USG-04: 残りの予算から決めた出力の上限（null は絞らない） */
+    let budgetCap: number | null = null
+
     const buildParams = (): Anthropic.Beta.MessageCreateParamsStreaming => {
       // 思考を止める場合は、以前の思考ブロックを送り返さない
       const history = this.buildMessages(threadId, assistantId, mode === 'on', true)
@@ -465,38 +524,53 @@ export class ChatService {
           Array.isArray(m.content) &&
           m.content.some((b) => SERVER_TOOL_BLOCKS.has((b as { type: string }).type))
       )
+      budgetCap = this.outputCap(
+        model,
+        remainingUsd,
+        billedCost(),
+        threadId,
+        history,
+        system,
+        paused
+      )
       return buildRequest(history, searchedBefore)
     }
     const buildRequest = (
       history: Anthropic.Beta.BetaMessageParam[],
       searchedBefore: boolean
-    ): Anthropic.Beta.MessageCreateParamsStreaming => ({
-      model,
-      max_tokens: Math.min(DEFAULT_MAX_TOKENS, info?.max_tokens ?? DEFAULT_MAX_TOKENS),
-      messages: [
-        ...history,
-        ...(paused.length > 0
-          ? [
-              {
-                role: 'assistant' as const,
-                content: paused as Anthropic.Beta.BetaContentBlockParam[]
-              }
-            ]
-          : [])
-      ],
-      ...(webSearch || searchedBefore ? { tools: [webTool] } : {}),
-      ...(!webSearch && searchedBefore ? { tool_choice: { type: 'none' as const } } : {}),
-      stream: true,
-      // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
-      cache_control: { type: 'ephemeral' },
-      ...(system ? { system } : {}),
-      ...(effort ? { output_config: { effort } } : {}),
-      ...thinkingParams(mode)
-    })
+    ): Anthropic.Beta.MessageCreateParamsStreaming => {
+      const thinkingPart = thinkingParams(mode)
+      const betas = [...(thinkingPart.betas ?? []), ...(useFallback ? [FALLBACK_BETA] : [])]
+      return {
+        model,
+        max_tokens: budgetCap !== null ? Math.min(modelMax, budgetCap) : modelMax,
+        messages: [
+          ...history,
+          ...(paused.length > 0
+            ? [
+                {
+                  role: 'assistant' as const,
+                  content: paused as Anthropic.Beta.BetaContentBlockParam[]
+                }
+              ]
+            : [])
+        ],
+        ...(webSearch || searchedBefore ? { tools: [webTool] } : {}),
+        ...(!webSearch && searchedBefore ? { tool_choice: { type: 'none' as const } } : {}),
+        stream: true,
+        // CHT-08: 長いカスタム指示や添付ファイルをキャッシュする
+        cache_control: { type: 'ephemeral' },
+        ...(system ? { system } : {}),
+        ...(effort ? { output_config: { effort } } : {}),
+        ...thinkingPart,
+        ...(useFallback ? { fallbacks: 'default' as const } : {}),
+        ...(betas.length > 0 ? { betas } : {})
+      }
+    }
     let params = buildParams()
 
     const apiKey = this.deps.getApiKey()
-    if (apiKey === null) return this.finish(assistantId, 'error', '', null, 'auth', null)
+    if (apiKey === null) return this.finish(assistantId, 'error', '', null, 'auth', null, null)
     // リトライは自前で行い、待機中であることを画面に表示する（6.14）
     const client = this.deps.createClient(apiKey, { maxRetries: 0 })
 
@@ -510,17 +584,54 @@ export class ChatService {
       cache_read_input_tokens: 0,
       web_search_requests: 0
     })
+    /** 受信中の応答の使用量（開始時に分かる入力など） */
     const usage = zero()
-    // pause_turn で続けた場合は、前の応答までの使用量を足す
-    const carried = zero()
-    const total = (): TokenUsage => ({
-      input_tokens: carried.input_tokens + usage.input_tokens,
-      output_tokens: carried.output_tokens + usage.output_tokens,
-      cache_creation_input_tokens:
-        carried.cache_creation_input_tokens + usage.cache_creation_input_tokens,
-      cache_read_input_tokens: carried.cache_read_input_tokens + usage.cache_read_input_tokens,
-      web_search_requests: (carried.web_search_requests ?? 0) + (usage.web_search_requests ?? 0)
-    })
+    /** 受信中の応答を作っているモデル（CHT-16: 拒否されて切り替わると変わる） */
+    let servedModel = model
+    const priceFor = (m: string): ModelPrice | null =>
+      remainingUsd !== null ? (this.deps.usage?.priceOf(m) ?? null) : null
+    let servedPrice = priceFor(model)
+    /** 受信中の応答の Web 検索の回数と、受け取った文字数（USG-04 の概算に使う） */
+    let searches = 0
+    let streamedChars = 0
+    /** 受信中の応答より前に確定した分の概算コスト（受信中は変わらないため、受信の開始時に求める） */
+    let spentBefore = 0
+    // 出力トークン数は応答の最後まで分からないため、文字数から少なめに見積もる（4 文字で 1 トークン）
+    const outputEstimate = (): number => Math.ceil(streamedChars / 4)
+    const checkBudget = (): void => {
+      if (remainingUsd === null || budgetHit || !servedPrice) return
+      const p = servedPrice
+      const spent =
+        spentBefore +
+        (usage.input_tokens * p.input +
+          usage.cache_creation_input_tokens * p.cacheWrite +
+          usage.cache_read_input_tokens * p.cacheRead +
+          Math.max(usage.output_tokens, outputEstimate()) * p.output) /
+          1_000_000 +
+        searches * WEB_SEARCH_USD
+      if (spent >= remainingUsd) {
+        budgetHit = true
+        console.info('[chat] stopping: usage limit reached during generation')
+        controller.abort()
+      }
+    }
+    /** 中断・エラーの時点までの使用量 */
+    const partial = (): ModelUsage[] => [
+      ...billed,
+      {
+        model: servedModel,
+        usage: {
+          ...usage,
+          // 上限で止めた場合は、受け取った分の出力と検索も数える（応答の最後の使用量が届かないため）
+          ...(budgetHit
+            ? {
+                output_tokens: Math.max(usage.output_tokens, outputEstimate()),
+                web_search_requests: Math.max(usage.web_search_requests ?? 0, searches)
+              }
+            : {})
+        }
+      }
+    ]
     const flush = (): void => {
       if (pending.text) emit({ type: 'text', threadId, messageId: assistantId, text: pending.text })
       if (pending.thinking) {
@@ -534,19 +645,60 @@ export class ChatService {
     let completed: { text: string; blocks: string; stopReason: string | null } | null = null
     try {
       for (let attempt = 0; ; attempt++) {
+        // USG-04: 残りの予算で十分な出力ができない場合は送らない
+        if (budgetCap !== null && budgetCap < MIN_BUDGET_OUTPUT) {
+          console.info('[chat] not sent: remaining budget is too small')
+          const started = text !== '' || paused.length > 0
+          return this.finish(
+            assistantId,
+            started ? 'stopped' : 'error',
+            text,
+            null,
+            'budget',
+            null,
+            { project, threadId, entries: billed },
+            servedModel
+          )
+        }
         try {
           const stream = client.beta.messages.stream(params, { signal })
           let searchInput: string | null = null
+          searches = 0
+          streamedChars = 0
+          spentBefore = remainingUsd !== null ? billedCost() : 0
           for await (const event of stream) {
             if (event.type === 'message_start') {
               Object.assign(usage, pickUsage(event.message.usage))
+              // CHT-16: 送信前に切り替わった場合は、開始の時点で回答するモデルが分かる
+              if (event.message.model && event.message.model !== servedModel) {
+                servedModel = event.message.model
+                servedPrice = priceFor(servedModel)
+              }
+              checkBudget()
             } else if (event.type === 'message_delta') {
               Object.assign(usage, pickUsage(event.usage))
+            } else if (
+              event.type === 'content_block_start' &&
+              event.content_block.type === 'fallback'
+            ) {
+              // CHT-16: 拒否されて別のモデルに切り替わった
+              const { from, to } = event.content_block
+              emit({
+                type: 'fallback',
+                threadId,
+                messageId: assistantId,
+                from: from.model,
+                to: to.model
+              })
+              servedModel = to.model
+              servedPrice = priceFor(servedModel)
             } else if (
               event.type === 'content_block_start' &&
               event.content_block.type === 'server_tool_use' &&
               event.content_block.name === 'web_search'
             ) {
+              searches++
+              checkBudget()
               // 結果を絞り込む版では、コード実行から呼ばれた検索の語が最初から入っている
               const query = (event.content_block.input as { query?: unknown } | null)?.query
               if (typeof query === 'string' && query !== '') {
@@ -569,24 +721,29 @@ export class ChatService {
               } else if (event.delta.type === 'text_delta') {
                 text += event.delta.text
                 pending.text += event.delta.text
+                streamedChars += event.delta.text.length
+                checkBudget()
               } else if (event.delta.type === 'thinking_delta') {
                 thinking += event.delta.thinking
                 pending.thinking += event.delta.thinking
+                streamedChars += event.delta.thinking.length
+                checkBudget()
               }
             }
           }
           const final = await stream.finalMessage()
-          Object.assign(usage, pickUsage(final.usage))
           flush()
           if (mode === 'disabled' || mode === 'between_tools') {
-            rememberOffMode(this.deps.db, model, mode)
+            rememberOffMode(db, model, mode)
           }
+          // CHT-16: フォールバックした場合は、試行ごとの使用量をモデルごとに分けて記録する
+          billed.push(...splitUsage(final, model))
+          if (final.model) servedModel = final.model
+          Object.assign(usage, zero())
           // CHT-11: サーバー側の検索が区切られたら、それまでの応答を付けて続きを頼む（回数に上限を設ける）
           if (final.stop_reason === 'pause_turn' && continuations < MAX_CONTINUATIONS) {
             continuations++
             paused = [...paused, ...final.content]
-            Object.assign(carried, total())
-            Object.assign(usage, zero())
             params = buildParams()
             attempt = -1
             continue
@@ -606,20 +763,33 @@ export class ChatService {
         } catch (error) {
           flush()
           if (signal.aborted) {
-            return this.finish(assistantId, 'stopped', text, null, null, null, {
-              project,
-              threadId,
-              model,
-              usage: total()
-            })
+            return this.finish(
+              assistantId,
+              'stopped',
+              text,
+              null,
+              budgetHit ? 'budget' : null,
+              null,
+              { project, threadId, entries: partial() },
+              servedModel
+            )
           }
           const nothingYet = text === '' && thinking === ''
+          // CHT-16: fallbacks を受け付けないモデルなら、指定せずに送り直し、次からは指定しない
+          if (nothingYet && useFallback && isFallbackConfigError(error)) {
+            rememberFallbackUnsupported(db, model)
+            console.warn(`[chat] fallbacks rejected for ${model}; sending without them`)
+            useFallback = false
+            params = buildParams()
+            attempt--
+            continue
+          }
           // CHT-07: 思考を止める指定を受け付けないモデルなら、次の指定を試す（どれも駄目ならオンのまま送る）
           if (nothingYet && offModes.length > 0 && isThinkingConfigError(error)) {
             offModes.shift()
             const next = offModes[0]
             if (!next && effort !== 'xhigh' && effort !== 'max') {
-              rememberOffMode(this.deps.db, model, 'unsupported')
+              rememberOffMode(db, model, 'unsupported')
             }
             console.warn(
               `[chat] thinking mode ${mode} rejected for ${model}; trying ${next ?? 'on'}`
@@ -644,17 +814,35 @@ export class ChatService {
             try {
               await this.sleep(waitMs, signal)
             } catch {
-              return this.finish(assistantId, 'stopped', text, null, null, null)
+              return this.finish(assistantId, 'stopped', text, null, null, null, null)
             }
             continue
           }
-          return this.finish(assistantId, 'error', text, null, apiError.kind, null, {
-            project,
-            threadId,
-            model,
-            usage: total()
-          })
+          return this.finish(
+            assistantId,
+            'error',
+            text,
+            null,
+            apiError.kind,
+            null,
+            { project, threadId, entries: partial() },
+            servedModel
+          )
         }
+      }
+      const billing = { project, threadId, entries: billed }
+      // USG-04: 予算で絞った出力の上限で止まった場合は、上限に達したため中断したものとして扱う
+      if (completed.stopReason === 'max_tokens' && budgetCap !== null && budgetCap < modelMax) {
+        return this.finish(
+          assistantId,
+          'stopped',
+          completed.text,
+          null,
+          'budget',
+          'max_tokens',
+          billing,
+          servedModel
+        )
       }
       return this.finish(
         assistantId,
@@ -663,11 +851,64 @@ export class ChatService {
         completed.blocks,
         null,
         completed.stopReason,
-        { project, threadId, model, usage: total() }
+        billing,
+        servedModel
       )
     } finally {
       clearInterval(timer)
+      stopSignal.removeEventListener('abort', relayStop)
     }
+  }
+
+  private estimate(model: string, usage: TokenUsage): number | null {
+    return this.deps.usage ? this.deps.usage.estimate(model, usage) : estimateCost(model, usage)
+  }
+
+  /**
+   * USG-04: 残りの予算から決める出力の上限（トークン）。上限が無い・単価が不明なら null
+   * 入力は送る前には正確に分からないため、直前のリクエストの実測値などから多めに見積もる
+   */
+  private outputCap(
+    model: string,
+    remainingUsd: number | null,
+    spentUsd: number,
+    threadId: string,
+    history: Anthropic.Beta.BetaMessageParam[],
+    system: string | null,
+    paused: Anthropic.Beta.BetaContentBlock[]
+  ): number | null {
+    if (remainingUsd === null) return null
+    const price = this.deps.usage?.priceOf(model)
+    if (!price || price.output <= 0) return null
+    const inputTokens = this.estimateInputTokens(threadId, history, system, paused)
+    const left = remainingUsd - spentUsd - (inputTokens * price.input) / 1_000_000
+    return Math.max(0, Math.floor((left * 1_000_000) / price.output))
+  }
+
+  /**
+   * 入力トークン数の見込み
+   * 直前のリクエストの実測値（入力と、次の入力になる出力）に、新しいメッセージの分を足す。
+   * 記録が無ければ全体を文字数から見積もる（1 文字を 1 トークンとして多めに数える）
+   */
+  private estimateInputTokens(
+    threadId: string,
+    history: Anthropic.Beta.BetaMessageParam[],
+    system: string | null,
+    paused: Anthropic.Beta.BetaContentBlock[]
+  ): number {
+    const measured = this.deps.usage?.contextOf(threadId).tokens ?? 0
+    const latest = history.at(-1)
+    const added =
+      measured > 0 && latest
+        ? roughTokens([latest])
+        : roughTokens(history) + [...(system ?? '')].length
+    const continued =
+      paused.length > 0
+        ? roughTokens([
+            { role: 'assistant', content: paused as Anthropic.Beta.BetaContentBlockParam[] }
+          ])
+        : 0
+    return measured + added + continued
   }
 
   private finish(
@@ -677,30 +918,32 @@ export class ChatService {
     contentBlocks: string | null,
     errorKind: ops.MessageRecord['error_kind'],
     stopReason: string | null,
-    billing?: { project: Project; threadId: string; model: string; usage: TokenUsage }
+    billing: { project: Project; threadId: string; entries: ModelUsage[] } | null,
+    /** CHT-16: 実際に回答したモデル（拒否されて切り替わった場合） */
+    servedModel?: string
   ): void {
     const { db } = this.deps
     let cost: number | null = null
     let tokens: number | null = null
-    // 停止・エラーでも、API が受け付けた分は課金されるため記録する
-    if (billing && billing.usage.input_tokens + billing.usage.output_tokens > 0) {
-      const u = billing.usage
-      cost = this.deps.usage
-        ? this.deps.usage.estimate(billing.model, u)
-        : estimateCost(billing.model, u)
-      tokens =
+    // 停止・エラーでも、API が受け付けた分は課金されるため記録する（フォールバックはモデルごとに記録する）
+    for (const { model, usage: u } of billing?.entries ?? []) {
+      const entryTokens =
         u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens
+      if (entryTokens === 0) continue
+      const entryCost = this.estimate(model, u)
+      if (entryCost !== null) cost = (cost ?? 0) + entryCost
+      tokens = (tokens ?? 0) + entryTokens
       ops.insertUsageRecord(db, {
-        project_id: billing.project.id,
-        project_name: billing.project.name,
-        thread_id: billing.threadId,
+        project_id: billing!.project.id,
+        project_name: billing!.project.name,
+        thread_id: billing!.threadId,
         message_id: assistantId,
-        model: billing.model,
+        model,
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         cache_read_tokens: u.cache_read_input_tokens,
         cache_write_tokens: u.cache_creation_input_tokens,
-        estimated_cost: cost ?? 0
+        estimated_cost: entryCost ?? 0
       })
     }
     ops.updateMessage(db, assistantId, {
@@ -710,13 +953,14 @@ export class ChatService {
       error_kind: errorKind,
       stop_reason: stopReason,
       tokens_used: tokens,
-      estimated_cost: cost
+      estimated_cost: cost,
+      ...(servedModel ? { model: servedModel } : {})
     })
+    const message = this.getPublic(assistantId)
     // 10.2: API 呼び出しの成否を記録する（本文は含めない）
     console.info(
-      `[chat] request ${status}: model=${billing?.model ?? '-'} tokens=${tokens ?? 0}${errorKind ? ` error=${errorKind}` : ''}${stopReason ? ` stop=${stopReason}` : ''}`
+      `[chat] request ${status}: model=${message.model ?? '-'} tokens=${tokens ?? 0}${errorKind ? ` error=${errorKind}` : ''}${stopReason ? ` stop=${stopReason}` : ''}`
     )
-    const message = this.getPublic(assistantId)
     // 完了の通知を受けてすぐ次の操作ができるよう、通知より先に「生成中」を解除する
     this.running.delete(message.thread_id)
     const errorMessage = errorKind ? API_ERROR_MESSAGES[errorKind] : null
@@ -860,7 +1104,8 @@ export class ChatService {
       ...rest,
       thinking: thinkingOf(record),
       sources: sourcesOf(record),
-      attachments: attachments.map(toInfo)
+      attachments: attachments.map(toInfo),
+      fallback: fallbackOf(record.content_blocks)
     }
   }
 }
@@ -883,6 +1128,37 @@ function pickUsage(
     .server_tool_use?.web_search_requests
   if (typeof searches === 'number') result.web_search_requests = searches
   return result
+}
+
+/**
+ * メッセージのトークン数の大まかな見込み（USG-04。多めに見積もる）
+ * 文字は 1 文字 1 トークン、画像は 1 枚あたり一定、PDF は大きさから見積もる
+ */
+function roughTokens(messages: Anthropic.Beta.BetaMessageParam[]): number {
+  let tokens = 0
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      tokens += [...m.content].length
+      continue
+    }
+    for (const b of m.content) {
+      const block = b as { type: string; text?: unknown; thinking?: unknown; source?: unknown }
+      if (block.type === 'image') tokens += IMAGE_TOKENS
+      else if (block.type === 'document') tokens += documentTokens(block.source)
+      else if (typeof block.text === 'string') tokens += [...block.text].length
+      else if (typeof block.thinking === 'string') tokens += [...block.thinking].length
+      else tokens += JSON.stringify(block).length
+    }
+  }
+  return tokens
+}
+
+function documentTokens(source: unknown): number {
+  const s = source as { type?: string; data?: unknown } | undefined
+  if (s?.type === 'text' && typeof s.data === 'string') return [...s.data].length
+  // PDF（base64）: 1 ページを 50KB・3,000 トークン程度として、大きさから見積もる
+  if (typeof s?.data === 'string') return Math.ceil((s.data.length * 3) / 4 / 16)
+  return IMAGE_TOKENS
 }
 
 /** server_tool_use の入力（JSON）から検索語を取り出す */

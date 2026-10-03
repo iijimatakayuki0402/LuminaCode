@@ -146,7 +146,28 @@ export const ja = {
       `プロジェクト／全体の設定を使う${model ? `（${model}）` : ''}`,
     chatComingSoon: '会話の送受信は次の段階で実装します。',
     workFolder: '作業フォルダ',
-    permissionMode: '権限モード'
+    permissionMode: '権限モード',
+    // THR-06・07: 色ラベルとタグ
+    labels: '色・タグ',
+    labelsTitle: (title: string) => `色・タグ: ${title}`,
+    color: '色ラベル',
+    noColor: 'なし',
+    colors: {
+      red: '赤',
+      orange: '橙',
+      yellow: '黄',
+      green: '緑',
+      blue: '青',
+      purple: '紫'
+    },
+    tags: 'タグ',
+    tagsNote: 'カンマ（,）または読点（、）で区切って入力します（10 個まで、1 個 20 文字まで）。',
+    filter: '絞り込み',
+    filterColor: '色',
+    filterTag: 'タグ',
+    allColors: 'すべての色',
+    allTags: 'すべてのタグ',
+    noMatch: '条件に合うスレッドはありません。'
   },
   chat: {
     user: 'USER',
@@ -176,6 +197,17 @@ export const ja = {
       interrupted: 'アプリの終了により中断しました（ここまでの応答を保持しています）'
     },
     refusal: 'この依頼への回答は控えられました。',
+    // CHT-16
+    fallback: (from: string, to: string) => `${from} が回答を控えたため、${to} が回答しました。`,
+    fallingBack: (from: string, to: string) =>
+      `${from} が回答を控えたため、${to} で回答しています…`,
+    // USG-04
+    budgetStopped:
+      '使用量の上限に達したため、回答を途中で止めました（ここまでの応答を保持しています）。',
+    // BMK-01
+    bookmark: 'ブックマーク',
+    bookmarkAdd: 'ブックマークに追加',
+    bookmarkRemove: 'ブックマークから外す',
     maxTokens: '出力の上限に達したため、途中で終わっています。',
     webSearching: (query: string) => `Web を検索しています: ${query}`,
     webSearchUnknown: '（検索語を取得中）',
@@ -204,7 +236,11 @@ export const ja = {
     summaryNote: 'このスレッドは、以前の会話の要約を引き継いでいます。',
     showSummary: '引き継いだ要約を表示',
     sendKey: '送信キー',
-    sendKeys: { enter: 'Enter で送信', ctrl_enter: 'Ctrl+Enter で送信' }
+    sendKeys: { enter: 'Enter で送信', ctrl_enter: 'Ctrl+Enter で送信' },
+    // CHT-16
+    fallbackSetting: '回答を拒否されたとき、別のモデルで回答し直す（推奨）',
+    fallbackNote:
+      '安全上の理由で回答を控えられた場合に、Anthropic が推奨する別のモデルで自動的に回答し直します（通常チャット）。回答し直したモデルの単価で料金がかかります。'
   },
   cowork: {
     tools: 'ツール実行',
@@ -361,7 +397,17 @@ export const ja = {
     actions: { stop: '新しいリクエストを停止する（推奨）', warn: '警告のみ' },
     saved: '保存しました。',
     pricingFile: (path: string) => `単価表のファイル: ${path}`,
-    pricingNote: '単価表は JSON ファイルを編集して更新できます（次のリクエストから反映）。'
+    pricingNote: '単価表は JSON ファイルを編集して更新できます（次のリクエストから反映）。',
+    // USG-07
+    cache: 'プロンプトキャッシュの効果',
+    cacheSaved: (usd: number) =>
+      usd >= 0 ? `約 $${formatUsd(usd)} 節約` : `約 $${formatUsd(-usd)} 増加`,
+    cacheHitRate: (rate: number | null) =>
+      rate === null ? 'ヒット率 —' : `ヒット率 ${(rate * 100).toFixed(1)}%`,
+    cacheTokens: (read: number, write: number) =>
+      `読み込み ${read.toLocaleString()} / 書き込み ${write.toLocaleString()} tokens`,
+    cacheNote:
+      '同じ内容（カスタム指示・添付ファイル・これまでの会話）を続けて送ると、キャッシュから読み込まれ、入力の料金が安くなります。節約額は、キャッシュが無かった場合の入力の料金との差から、キャッシュ書き込みの割増分を引いた概算です。'
   },
   data: {
     section: 'データ',
@@ -448,7 +494,22 @@ export const ja = {
     button: 'スニペット',
     filter: '名前・内容で絞り込み',
     emptyPicker: 'スニペットがありません。設定画面で追加できます。',
-    noMatch: '一致するスニペットがありません。'
+    noMatch: '一致するスニペットがありません。',
+    // CHT-15
+    variablesNote:
+      '{{対象}} のように二重の波かっこで囲むと変数になり、呼び出したときに値を入力できます。',
+    fillTitle: (name: string) => `スニペット「${name}」の変数`,
+    insert: '挿入',
+    variables: (n: number) => `変数 ${n} 個`
+  },
+  bookmarks: {
+    // BMK-02
+    nav: 'ブックマーク',
+    title: 'BOOKMARKS',
+    allProjects: 'すべてのプロジェクト',
+    none: 'ブックマークはまだありません。回答の下の「☆」で追加できます。',
+    remove: '外す',
+    bookmarkedAt: (time: string) => `${time} に追加`
   },
   instructions: {
     section: '共通のカスタム指示',

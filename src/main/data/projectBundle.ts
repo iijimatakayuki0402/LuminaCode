@@ -9,7 +9,7 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { activePath } from '@shared/conversation'
-import type { ImportPreview, Project } from '@shared/types'
+import { THREAD_COLORS, type ImportPreview, type Project } from '@shared/types'
 import { ValidationError, type MessageRecord } from '../db/operations'
 import * as ops from '../db/operations'
 import type { AttachmentStore } from '../chat/attachments'
@@ -29,6 +29,10 @@ interface BundleThread {
   active_leaf_id: string | null
   created_at: number
   updated_at: number
+  /** THR-06。この項目が無い古いファイルは無しとして読み込む */
+  color?: string | null
+  /** THR-06（JSON 配列の文字列） */
+  tags?: string
 }
 
 interface BundleMessage {
@@ -45,6 +49,8 @@ interface BundleMessage {
   tokens_used: number | null
   estimated_cost: number | null
   created_at: number
+  /** BMK-01 */
+  bookmarked_at?: number | null
 }
 
 interface BundleAttachment {
@@ -78,7 +84,8 @@ export function exportProject(
   void _id
   const threads = db
     .prepare(
-      `SELECT id, title, model, effort, extended_thinking, context_summary, title_source, active_leaf_id, created_at, updated_at
+      `SELECT id, title, model, effort, extended_thinking, context_summary, title_source, active_leaf_id, created_at, updated_at,
+         color, tags
        FROM threads WHERE project_id = ? ORDER BY created_at, rowid`
     )
     .all(projectId) as BundleThread[]
@@ -99,7 +106,8 @@ export function exportProject(
         error_kind: m.error_kind,
         tokens_used: m.tokens_used,
         estimated_cost: m.estimated_cost,
-        created_at: m.created_at
+        created_at: m.created_at,
+        bookmarked_at: m.bookmarked_at
       })
     }
     for (const a of ops.listAttachmentsByThread(db, thread.id)) {
@@ -211,6 +219,19 @@ export function previewBundle(bundle: ProjectBundle, token: string): ImportPrevi
 const STATUSES = new Set(['complete', 'stopped', 'error', 'interrupted'])
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const PERMISSION_MODES = new Set(['confirm_each', 'auto_edit', 'plan_only'])
+const COLORS = new Set<string>(THREAD_COLORS)
+
+/** タグ（THR-06）。読めない・上限を超えるものは無しにする */
+function bundleTags(value: unknown): string {
+  if (!str(value)) return '[]'
+  try {
+    const tags = JSON.parse(value) as unknown
+    if (!Array.isArray(tags) || !tags.every(str)) return '[]'
+    return JSON.stringify(ops.normalizeTags(tags))
+  } catch {
+    return '[]'
+  }
+}
 
 /** 応答の内容ブロックは、ブロックの配列として読めるものだけ取り込む（壊れているとスレッドを開けなくなるため） */
 function validContentBlocks(value: unknown): string | null {
@@ -264,8 +285,8 @@ export function importBundle(
 
     const insertThread = db.prepare(
       `INSERT INTO threads (id, project_id, title, model, effort, context_summary, title_source,
-         extended_thinking, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?)`
+         extended_thinking, created_at, updated_at, color, tags)
+       VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?)`
     )
     for (const t of bundle.threads) {
       insertThread.run(
@@ -277,14 +298,16 @@ export function importBundle(
         str(t.context_summary) ? t.context_summary : null,
         t.extended_thinking === 0 ? 0 : 1,
         num(t.created_at) ? t.created_at : Date.now(),
-        num(t.updated_at) ? t.updated_at : Date.now()
+        num(t.updated_at) ? t.updated_at : Date.now(),
+        t.color && COLORS.has(t.color) ? t.color : null,
+        bundleTags(t.tags)
       )
     }
 
     const insertMessage = db.prepare(
       `INSERT INTO messages (id, thread_id, parent_id, role, content, content_blocks, status, model,
-         stop_reason, error_kind, tokens_used, estimated_cost, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         stop_reason, error_kind, tokens_used, estimated_cost, created_at, bookmarked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     const known = new Set(bundle.messages.map((m) => m.id))
     for (const m of bundle.messages) {
@@ -302,7 +325,8 @@ export function importBundle(
         null,
         num(m.tokens_used) ? m.tokens_used : null,
         num(m.estimated_cost) ? m.estimated_cost : null,
-        num(m.created_at) ? m.created_at : Date.now()
+        num(m.created_at) ? m.created_at : Date.now(),
+        m.role === 'assistant' && num(m.bookmarked_at) ? m.bookmarked_at : null
       )
     }
 

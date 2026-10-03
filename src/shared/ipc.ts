@@ -8,6 +8,7 @@ import type {
   ApiErrorKind,
   ApiKeyStatus,
   BackupInfo,
+  BookmarkRow,
   ImportPreview,
   SearchHit,
   SearchQuery,
@@ -108,6 +109,10 @@ export interface IpcContract {
   'threads:setActiveLeaf': { args: [threadId: string, messageId: string]; result: Thread }
 
   'messages:listByThread': { args: [threadId: string]; result: Message[] }
+  /** 回答のブックマークを付け外しする（BMK-01） */
+  'messages:setBookmark': { args: [messageId: string, on: boolean]; result: void }
+  /** ブックマークの一覧（BMK-02）。projectId で絞り込める */
+  'bookmarks:list': { args: [projectId?: string]; result: BookmarkRow[] }
 
   'apiKey:getStatus': { args: []; result: ApiKeyStatus }
   /** 疎通テストに成功した場合のみ保存する（要件 KEY-02） */
@@ -325,6 +330,10 @@ export interface LuminaApi {
   }
   messages: {
     listByThread: Invoke<'messages:listByThread'>
+    setBookmark: Invoke<'messages:setBookmark'>
+  }
+  bookmarks: {
+    list: Invoke<'bookmarks:list'>
   }
   apiKey: {
     getStatus: Invoke<'apiKey:getStatus'>

@@ -26,6 +26,13 @@ export interface Project {
   updated_at: number
 }
 
+/** スレッドの色ラベル（THR-06） */
+export type ThreadColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple'
+export const THREAD_COLORS: ThreadColor[] = ['red', 'orange', 'yellow', 'green', 'blue', 'purple']
+/** タグの上限（THR-06） */
+export const THREAD_TAGS_MAX = 10
+export const THREAD_TAG_LENGTH_MAX = 20
+
 export interface Thread {
   id: string
   project_id: string
@@ -43,6 +50,10 @@ export interface Thread {
   context_summary: string | null
   /** タイトルの由来（THR-03） */
   title_source: 'auto' | 'ai' | 'manual'
+  /** 色ラベル（THR-06）。null は無し */
+  color: ThreadColor | null
+  /** タグ（THR-06） */
+  tags: string[]
 }
 
 /**
@@ -104,6 +115,10 @@ export interface Message {
   /** Web 検索の出典（CHT-11。回答の引用元。重複は除く） */
   sources: WebSource[]
   attachments: AttachmentInfo[]
+  /** ブックマークした日時（BMK-01）。null は未設定 */
+  bookmarked_at: number | null
+  /** 拒否されて別のモデルが回答した場合の、拒否したモデルと回答したモデル（CHT-16） */
+  fallback: { from: string; to: string } | null
 }
 
 export interface WebSource {
@@ -155,6 +170,10 @@ export interface UpdateThreadInput {
   extended_thinking?: boolean
   /** 空文字でモデルの既定に戻す */
   effort?: EffortLevel | ''
+  /** 色ラベル（THR-06）。空文字で外す */
+  color?: ThreadColor | ''
+  /** タグ（THR-06）。指定した内容で置き換える */
+  tags?: string[]
 }
 
 export interface ListProjectsOptions {
@@ -205,6 +224,8 @@ export interface StageResult {
 export interface ChatPrefs {
   /** 送信キー（CHT-09: 既定は Enter。Ctrl+Enter に変更できる） */
   sendKey: 'enter' | 'ctrl_enter'
+  /** 拒否されたときに別のモデルで回答し直す（CHT-16: 既定はオン） */
+  fallback: boolean
 }
 
 /**
@@ -229,6 +250,8 @@ export type ChatEvent =
   | { type: 'permission'; threadId: string; request: PermissionRequest }
   /** Cowork: todo の更新（COW-13） */
   | { type: 'todos'; threadId: string; messageId: string; todos: TodoItem[] }
+  /** 通常チャット: 拒否されて別のモデルが回答している（CHT-16） */
+  | { type: 'fallback'; threadId: string; messageId: string; from: string; to: string }
   /** 通常チャット: Web を検索している（CHT-11） */
   | { type: 'webSearch'; threadId: string; messageId: string; query: string }
   /** スレッドのタイトルなどが更新された（THR-03 の自動生成） */
@@ -474,6 +497,22 @@ export interface SearchHit {
   snippet: string
 }
 
+/** ブックマークの一覧の 1 件（BMK-02） */
+export interface BookmarkRow {
+  message_id: string
+  thread_id: string
+  thread_title: string | null
+  project_id: string
+  project_name: string
+  project_type: ProjectType
+  /** 回答の日時 */
+  created_at: number
+  bookmarked_at: number
+  model: string | null
+  /** 回答の冒頭 */
+  excerpt: string
+}
+
 /** 読み込む前の確認（EXP-01） */
 export interface ImportPreview {
   /** 読み込みを確定するときに指定する */
@@ -552,9 +591,21 @@ export interface ProjectUsage {
   limit: number | null
 }
 
+/** プロンプトキャッシュの効果（USG-07） */
+export interface CacheEffect {
+  /** キャッシュで節約できた概算額（USD）。書き込みの割増分を引いた額で、負になることもある */
+  savedUsd: number
+  /** 入力のうちキャッシュから読み込んだ割合（0〜1）。入力が無ければ null */
+  hitRate: number | null
+  readTokens: number
+  writeTokens: number
+}
+
 export interface UsageSummary {
   month: string
   total: UsageTotals
+  /** 選んだ月のキャッシュの効果（USG-07） */
+  cache: CacheEffect
   months: { month: string; totals: UsageTotals }[]
   projects: ProjectUsage[]
   /** 設定されているプロジェクト別の上限（当月に使用量の無いプロジェクトを含む） */

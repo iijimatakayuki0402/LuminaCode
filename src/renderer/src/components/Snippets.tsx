@@ -1,13 +1,15 @@
 /**
  * 定型プロンプト（スニペット。要件 CHT-12）
  * 設定画面で管理し、入力欄の「スニペット」から選んでカーソル位置に挿入する。
+ * CHT-15: {{名前}} の変数があれば、値を入力してから挿入する。
  */
 
 import { useEffect, useId, useState } from 'react'
+import { fillSnippet, snippetVariables } from '@shared/snippetVariables'
 import type { Snippet } from '@shared/types'
 import { unwrap } from '../lib/ipc'
 import { ja } from '../locales/ja'
-import { ConfirmDialog } from './Dialog'
+import { ConfirmDialog, Dialog } from './Dialog'
 import { Message, type MessageState } from './Message'
 
 const EMPTY = { id: undefined as string | undefined, name: '', content: '' }
@@ -57,6 +59,7 @@ export function SnippetsSection(): React.JSX.Element {
     <section className="panel" aria-labelledby="settings-snippets">
       <h2 id="settings-snippets">{ja.snippets.section}</h2>
       <p className="hint">{ja.snippets.note}</p>
+      <p className="hint">{ja.snippets.variablesNote}</p>
       {list.length === 0 ? (
         <p className="hint">{ja.snippets.none}</p>
       ) : (
@@ -149,6 +152,14 @@ export function SnippetPicker({
   const [open, setOpen] = useState(false)
   const [list, setList] = useState<Snippet[] | null>(null)
   const [filter, setFilter] = useState('')
+  /** CHT-15: 変数の値を入力中のスニペット */
+  const [filling, setFilling] = useState<Snippet | null>(null)
+
+  const choose = (snippet: Snippet): void => {
+    setOpen(false)
+    if (snippetVariables(snippet.content).length > 0) setFilling(snippet)
+    else onInsert(snippet.content)
+  }
 
   const toggle = (): void => {
     if (open) {
@@ -203,15 +214,16 @@ export function SnippetPicker({
             <ul className="command-list" role="listbox">
               {shown.map((s) => (
                 <li key={s.id}>
-                  <button
-                    type="button"
-                    className="command-item"
-                    onClick={() => {
-                      onInsert(s.content)
-                      setOpen(false)
-                    }}
-                  >
-                    <span>{s.name}</span>
+                  <button type="button" className="command-item" onClick={() => choose(s)}>
+                    <span>
+                      {s.name}
+                      {snippetVariables(s.content).length > 0 && (
+                        <span className="hint">
+                          {' '}
+                          ({ja.snippets.variables(snippetVariables(s.content).length)})
+                        </span>
+                      )}
+                    </span>
                     <span className="hint">{s.content.slice(0, 60)}</span>
                   </button>
                 </li>
@@ -220,6 +232,79 @@ export function SnippetPicker({
           )}
         </div>
       )}
+      {filling && (
+        <FillDialog
+          snippet={filling}
+          onCancel={() => setFilling(null)}
+          onInsert={(content) => {
+            setFilling(null)
+            onInsert(content)
+          }}
+        />
+      )}
     </span>
+  )
+}
+
+/**
+ * 変数の値を入力するダイアログ（CHT-15）。同じ名前の変数は 1 つの入力欄にまとめる
+ */
+function FillDialog({
+  snippet,
+  onCancel,
+  onInsert
+}: {
+  snippet: Snippet
+  onCancel: () => void
+  onInsert: (content: string) => void
+}): React.JSX.Element {
+  const names = snippetVariables(snippet.content)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const formId = useId()
+  return (
+    <Dialog
+      title={ja.snippets.fillTitle(snippet.name)}
+      onClose={onCancel}
+      footer={
+        <>
+          <button className="btn" type="button" onClick={onCancel}>
+            {ja.common.cancel}
+          </button>
+          <button className="btn btn-primary" type="submit" form={formId}>
+            {ja.snippets.insert}
+          </button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        onSubmit={(e) => {
+          e.preventDefault()
+          onInsert(fillSnippet(snippet.content, values))
+        }}
+      >
+        {names.map((name, i) => (
+          <div className="field" key={name}>
+            <label htmlFor={`${formId}-${i}`}>{name}</label>
+            <textarea
+              id={`${formId}-${i}`}
+              className="input textarea snippet-value"
+              rows={2}
+              autoFocus={i === 0}
+              value={values[name] ?? ''}
+              onChange={(e) => setValues({ ...values, [name]: e.target.value })}
+              onKeyDown={(e) => {
+                // Ctrl+Enter で挿入する（Enter は改行）
+                if (e.key === 'Enter' && e.ctrlKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  onInsert(fillSnippet(snippet.content, values))
+                }
+              }}
+            />
+          </div>
+        ))}
+        <p className="hint">{snippet.content.slice(0, 200)}</p>
+      </form>
+    </Dialog>
   )
 }

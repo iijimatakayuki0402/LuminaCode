@@ -13,12 +13,15 @@ import type {
   MessageRole,
   MessageStatus,
   PermissionMode,
+  BookmarkRow,
   Project,
   ProjectType,
   Thread,
+  ThreadColor,
   UpdateProjectInput,
   UpdateThreadInput
 } from '@shared/types'
+import { THREAD_TAG_LENGTH_MAX, THREAD_TAGS_MAX } from '@shared/types'
 
 // ========================================
 // 型定義
@@ -52,6 +55,9 @@ interface ThreadRow {
   effort: EffortLevel | null
   context_summary: string | null
   title_source: 'auto' | 'ai' | 'manual'
+  color: ThreadColor | null
+  /** JSON 配列 */
+  tags: string
 }
 
 /**
@@ -71,6 +77,8 @@ export interface MessageRecord {
   model: string | null
   stop_reason: string | null
   error_kind: ApiErrorKind | null
+  /** ブックマークした日時（BMK-01） */
+  bookmarked_at: number | null
   /** Cowork: Agent SDK のセッション内の位置（編集・再実行で巻き戻す） */
   agent_resume_uuid?: string | null
   /** Cowork: 実行終了時点の Agent SDK の累計（JSON） */
@@ -99,10 +107,20 @@ function toProject(row: ProjectRow): Project {
   }
 }
 
+function parseTags(json: string): string[] {
+  try {
+    const tags = JSON.parse(json) as unknown
+    return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 function toThread(row: ThreadRow): Thread {
   return {
     ...row,
-    extended_thinking: Boolean(row.extended_thinking)
+    extended_thinking: Boolean(row.extended_thinking),
+    tags: parseTags(row.tags)
   }
 }
 
@@ -342,6 +360,8 @@ export function updateThread(
 ): Thread | null {
   const current = getThread(db, id)
   if (!current) return null
+  // 書き込む前に検証する（途中まで更新されないように）
+  const tags = input.tags !== undefined ? JSON.stringify(normalizeTags(input.tags)) : undefined
 
   const updates: string[] = []
   const values: (string | number | null)[] = []
@@ -358,9 +378,15 @@ export function updateThread(
   if (input.title_source !== undefined) set('title_source', input.title_source)
   if (input.context_summary !== undefined) set('context_summary', input.context_summary)
 
-  // 表示中の分岐の切り替えは、スレッドの更新日時（一覧の並び順）を変えない
+  // 表示中の分岐の切り替えと色ラベル・タグ（THR-06）は、スレッドの更新日時（一覧の並び順）を変えない
   if (input.active_leaf_id !== undefined) {
     db.prepare('UPDATE threads SET active_leaf_id = ? WHERE id = ?').run(input.active_leaf_id, id)
+  }
+  if (input.color !== undefined) {
+    db.prepare('UPDATE threads SET color = ? WHERE id = ?').run(input.color || null, id)
+  }
+  if (tags !== undefined) {
+    db.prepare('UPDATE threads SET tags = ? WHERE id = ?').run(tags, id)
   }
   if (updates.length === 0) return getThread(db, id)
 
@@ -368,6 +394,25 @@ export function updateThread(
   values.push(id)
   db.prepare(`UPDATE threads SET ${updates.join(', ')} WHERE id = ?`).run(...values)
   return getThread(db, id)
+}
+
+/**
+ * タグを整える（THR-06: 前後の空白を除き、空と重複を除く。数と長さの上限を超えたら保存しない）
+ */
+export function normalizeTags(tags: string[]): string[] {
+  const result: string[] = []
+  for (const raw of tags) {
+    const tag = raw.trim()
+    if (tag === '' || result.includes(tag)) continue
+    if (charLength(tag) > THREAD_TAG_LENGTH_MAX) {
+      throw new ValidationError(`タグは ${THREAD_TAG_LENGTH_MAX} 文字以内で入力してください。`)
+    }
+    result.push(tag)
+  }
+  if (result.length > THREAD_TAGS_MAX) {
+    throw new ValidationError(`タグは 1 つのスレッドに ${THREAD_TAGS_MAX} 個まで付けられます。`)
+  }
+  return result
 }
 
 export function deleteThread(db: Database.Database, id: string): boolean {
@@ -477,6 +522,8 @@ export function listMessagesByThread(db: Database.Database, threadId: string): M
 
 export interface UpdateMessageInput {
   content?: string
+  /** 応答したモデル（CHT-16: フォールバックした場合は回答したモデルに変える） */
+  model?: string | null
   status?: MessageStatus
   content_blocks?: string | null
   stop_reason?: string | null
@@ -487,6 +534,7 @@ export interface UpdateMessageInput {
 
 const UPDATABLE_MESSAGE_COLUMNS: (keyof UpdateMessageInput)[] = [
   'content',
+  'model',
   'status',
   'content_blocks',
   'stop_reason',
@@ -513,6 +561,46 @@ export function updateMessage(db: Database.Database, id: string, input: UpdateMe
 export function markStreamingInterrupted(db: Database.Database): number {
   return db.prepare("UPDATE messages SET status = 'interrupted' WHERE status = 'streaming'").run()
     .changes
+}
+
+// ========================================
+// ブックマーク（要件 BMK-01〜03）
+// ========================================
+
+/** ブックマークを付け外しする。対象が無い・回答でない場合は false */
+export function setBookmark(db: Database.Database, messageId: string, on: boolean): boolean {
+  return (
+    db
+      .prepare("UPDATE messages SET bookmarked_at = ? WHERE id = ? AND role = 'assistant'")
+      .run(on ? Date.now() : null, messageId).changes > 0
+  )
+}
+
+const EXCERPT_LENGTH = 120
+
+/** 新しく付けた順（BMK-02）。projectId で絞り込める */
+export function listBookmarks(db: Database.Database, projectId?: string): BookmarkRow[] {
+  const rows = db
+    .prepare(
+      `SELECT m.id AS message_id, m.thread_id, t.title AS thread_title, p.id AS project_id,
+         p.name AS project_name, p.type AS project_type, m.created_at, m.bookmarked_at, m.model,
+         substr(m.content, 1, ?) AS excerpt
+       FROM messages m
+       JOIN threads t ON t.id = m.thread_id
+       JOIN projects p ON p.id = t.project_id
+       WHERE m.bookmarked_at IS NOT NULL ${projectId ? 'AND p.id = ?' : ''}
+       ORDER BY m.bookmarked_at DESC, m.rowid DESC`
+    )
+    .all(EXCERPT_LENGTH * 2, ...(projectId ? [projectId] : [])) as BookmarkRow[]
+  return rows.map((r) => ({ ...r, excerpt: excerptOf(r.excerpt) }))
+}
+
+/** 改行をまとめた冒頭（文字数で切る） */
+function excerptOf(text: string): string {
+  const chars = [...text.replace(/\s+/g, ' ').trim()]
+  return chars.length > EXCERPT_LENGTH
+    ? `${chars.slice(0, EXCERPT_LENGTH).join('')}…`
+    : chars.join('')
 }
 
 // ========================================

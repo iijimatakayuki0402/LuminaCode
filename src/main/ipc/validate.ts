@@ -5,7 +5,7 @@
  */
 
 import { ACCENTS, MODES } from '@shared/theme'
-import { EFFORT_LEVELS, type EffortLevel } from '@shared/types'
+import { EFFORT_LEVELS, THREAD_COLORS, type EffortLevel, type ThreadColor } from '@shared/types'
 import type {
   Appearance,
   CoworkFolderAccess,
@@ -144,7 +144,8 @@ export const editAndResendInput = object<EditAndResendInput>({
 })
 
 export const chatPrefsInput = object<Partial<ChatPrefs>>({
-  sendKey: optional(oneOf(['enter', 'ctrl_enter'] as const))
+  sendKey: optional(oneOf(['enter', 'ctrl_enter'] as const)),
+  fallback: optional(bool)
 })
 
 export const permissionResponse = oneOf<PermissionResponse>(['once', 'thread', 'project', 'deny'])
@@ -238,7 +239,10 @@ export const updateThreadInput = object<UpdateThreadInput>({
   title: optional(str),
   model: optional(str),
   extended_thinking: optional(bool),
-  effort: optional(oneOf<EffortLevel | ''>([...EFFORT_LEVELS, '']))
+  effort: optional(oneOf<EffortLevel | ''>([...EFFORT_LEVELS, ''])),
+  color: optional(oneOf<ThreadColor | ''>([...THREAD_COLORS, ''])),
+  // 数と長さの上限は保存時に確かめる（THR-06。画面に表示できる文言にするため）
+  tags: optional(array(str, 50))
 })
 
 export const snippetInput = object<SnippetInput>({

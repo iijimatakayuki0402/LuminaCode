@@ -1312,3 +1312,115 @@ kbd {
   padding: 0.15rem 0.4rem;
   font-size: 0.8rem;
 }
+
+/* スニペットの変数の入力（CHT-15） */
+.textarea.snippet-value {
+  min-height: 3rem;
+}
+
+/* スレッドの色ラベルとタグ（THR-06・07）。色だけに頼らず、色名を title・読み上げで示す */
+:root {
+  --label-red: #d64545;
+  --label-orange: #e07b28;
+  --label-yellow: #c9a400;
+  --label-green: #3a9a4f;
+  --label-blue: #3576d1;
+  --label-purple: #8a5bd1;
+}
+:root[data-mode='dark'] {
+  --label-red: #ff7b7b;
+  --label-orange: #ffa45c;
+  --label-yellow: #f2d34f;
+  --label-green: #6cd38a;
+  --label-blue: #79aaff;
+  --label-purple: #c19bff;
+}
+.thread-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.thread-main > button.thread-open {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.45rem 0.5rem 0.15rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.thread-main > button.thread-open:only-child {
+  padding-bottom: 0.45rem;
+}
+.thread-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.label-dot {
+  flex: none;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid var(--border);
+}
+.label-dot.color-red {
+  background: var(--label-red);
+}
+.label-dot.color-orange {
+  background: var(--label-orange);
+}
+.label-dot.color-yellow {
+  background: var(--label-yellow);
+}
+.label-dot.color-green {
+  background: var(--label-green);
+}
+.label-dot.color-blue {
+  background: var(--label-blue);
+}
+.label-dot.color-purple {
+  background: var(--label-purple);
+}
+.thread-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0 0.5rem 0.4rem;
+}
+.tag-chip {
+  font-size: 0.7rem;
+  line-height: 1.4;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: var(--bg);
+}
+.thread-filter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+.thread-filter .select {
+  min-width: 0;
+  font-size: 0.8rem;
+}
+.color-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+}
+
+/* ブックマーク（BMK-01） */
+.btn.bookmark-on {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}

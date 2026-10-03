@@ -147,6 +147,19 @@ export function UsageScreen(): React.JSX.Element {
         </div>
       </section>
 
+      {/* USG-07: プロンプトキャッシュの効果（選んだ月） */}
+      <section className="panel" aria-labelledby="usage-cache">
+        <h2 id="usage-cache">{ja.usage.cache}</h2>
+        <p className="usage-big mono">
+          {ja.usage.cacheSaved(summary.cache.savedUsd)}・
+          {ja.usage.cacheHitRate(summary.cache.hitRate)}
+        </p>
+        <p className="hint">
+          {ja.usage.cacheTokens(summary.cache.readTokens, summary.cache.writeTokens)}
+        </p>
+        <p className="hint">{ja.usage.cacheNote}</p>
+      </section>
+
       <section className="panel" aria-labelledby="usage-projects">
         <h2 id="usage-projects">{ja.usage.byProject}</h2>
         {rows.length === 0 ? (

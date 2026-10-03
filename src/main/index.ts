@@ -19,6 +19,7 @@ import { createAnthropicClient } from './api/client'
 import { AttachmentStore } from './chat/attachments'
 import { ChatService } from './chat/chatService'
 import { TitleGenerator } from './chat/titleGenerator'
+import { getChatPrefs } from './settings/chatPrefs'
 import { getGlobalInstructions } from './settings/instructions'
 import { CoworkService } from './cowork/coworkService'
 import { McpStore } from './cowork/mcpStore'
@@ -286,6 +287,8 @@ function setupBackend(): boolean {
     getGlobalInstructions: globalInstructions,
     // CHT-11: Web 検索の設定は Cowork の Web の設定と同じ（プロジェクトごと）
     isWebSearchEnabled: (projectId) => getCoworkSettings(db, projectId).webAccess,
+    // CHT-16: 拒否されたときのフォールバック（設定画面でオフにできる）
+    isFallbackEnabled: () => getChatPrefs(db).fallback,
     attachments,
     modelService,
     getApiKey: () => apiKeyStore.get(),

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcChannel, IpcResult } from '../../src/shared/ipc'
 import type { ApiKeyStatus, Appearance, ModelList, Project, Thread } from '../../src/shared/types'
 import { createInMemoryDatabase } from '../../src/main/db/init'
+import * as ops from '../../src/main/db/operations'
 import { createHandlers, type IpcHandlers } from '../../src/main/ipc/handlers'
 import { UpdateService } from '../../src/main/update/updateService'
 import { invokeHandler } from '../../src/main/ipc/register'
@@ -277,6 +278,47 @@ describe('threads / messages', () => {
     expect((await value<Thread>('threads:getLastOpened', project.id)).id).toBe(thread.id)
   })
 
+  it('色ラベルとタグを変更でき、不正な値は拒否する（THR-06）', async () => {
+    const thread = await value<Thread>('threads:create', { project_id: project.id })
+    expect(
+      await value<Thread>('threads:update', thread.id, { color: 'purple', tags: ['a', 'b'] })
+    ).toMatchObject({ color: 'purple', tags: ['a', 'b'] })
+    expect(await call('threads:update', thread.id, { color: 'gold' })).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+    expect(await call('threads:update', thread.id, { tags: 'a' })).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+    expect(await call('threads:update', thread.id, { tags: ['あ'.repeat(21)] })).toMatchObject({
+      error: { code: 'validation' }
+    })
+  })
+
+  it('回答にブックマークを付け外しし、一覧できる（BMK-01、BMK-02）', async () => {
+    const thread = await value<Thread>('threads:create', { project_id: project.id })
+    const user = ops.createMessage(db, { thread_id: thread.id, role: 'user', content: 'Q' })
+    const answer = ops.createMessage(db, { thread_id: thread.id, role: 'assistant', content: 'A' })
+    await value('messages:setBookmark', answer.id, true)
+    expect(await value('bookmarks:list')).toMatchObject([{ message_id: answer.id, excerpt: 'A' }])
+    expect(await value('bookmarks:list', project.id)).toHaveLength(1)
+    const [message] = (
+      await value<{ id: string; bookmarked_at: number | null }[]>(
+        'messages:listByThread',
+        thread.id
+      )
+    ).filter((m) => m.id === answer.id)
+    expect(message.bookmarked_at).not.toBeNull()
+    // ユーザーのメッセージ・存在しないメッセージには付けられない
+    expect(await call('messages:setBookmark', user.id, true)).toMatchObject({
+      error: { code: 'not_found' }
+    })
+    expect(await call('messages:setBookmark', answer.id, 'yes')).toMatchObject({
+      error: { code: 'invalid_argument' }
+    })
+    await value('messages:setBookmark', answer.id, false)
+    expect(await value('bookmarks:list')).toEqual([])
+  })
+
   it('存在しないプロジェクトにはスレッドを作れない', async () => {
     expect(await call('threads:create', { project_id: 'missing' })).toMatchObject({
       ok: false,
@@ -478,9 +520,15 @@ describe('Stage 5: チャット・添付ファイルの引数検証', () => {
   })
 
   it('送信キーの設定（CHT-09）', async () => {
-    expect(await value('settings:getChatPrefs')).toEqual({ sendKey: 'enter' })
+    expect(await value('settings:getChatPrefs')).toEqual({ sendKey: 'enter', fallback: true })
     expect(await value('settings:setChatPrefs', { sendKey: 'ctrl_enter' })).toEqual({
-      sendKey: 'ctrl_enter'
+      sendKey: 'ctrl_enter',
+      fallback: true
+    })
+    // CHT-16: フォールバックは既定でオン。オフにできる
+    expect(await value('settings:setChatPrefs', { fallback: false })).toEqual({
+      sendKey: 'ctrl_enter',
+      fallback: false
     })
     expect(await call('settings:setChatPrefs', { sendKey: 'shift' })).toMatchObject({
       error: { code: 'invalid_argument' }

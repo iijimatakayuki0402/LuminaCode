@@ -24,6 +24,8 @@ import {
   getSetting,
   setSetting,
   deleteSetting,
+  listBookmarks,
+  setBookmark,
   ValidationError
 } from '../../src/main/db/operations'
 
@@ -470,5 +472,72 @@ describe('使用量記録・操作ログ', () => {
     }
     expect(() => insert.run('x', thread.id, 'allowed_always', Date.now())).toThrow()
     expect(() => insert.run('y', thread.id, null, Date.now())).toThrow()
+  })
+})
+
+describe('スレッドの色ラベル・タグ（THR-06）とブックマーク（BMK-01、BMK-02）', () => {
+  it('色とタグを保存し、一覧の並び順（更新日時）は変えない', () => {
+    const project = createProject(db, { type: 'chat', name: 'P' })
+    const thread = createThread(db, { project_id: project.id })
+    expect(thread).toMatchObject({ color: null, tags: [] })
+    vi.advanceTimersByTime(1000)
+    const updated = updateThread(db, thread.id, {
+      color: 'blue',
+      tags: [' 仕事 ', '仕事', '', '調査']
+    })!
+    expect(updated).toMatchObject({ color: 'blue', tags: ['仕事', '調査'] })
+    expect(updated.updated_at).toBe(thread.updated_at)
+    expect(updateThread(db, thread.id, { color: '', tags: [] })).toMatchObject({
+      color: null,
+      tags: []
+    })
+  })
+
+  it('タグの数と長さの上限を超えると保存しない（途中まで更新もしない）', () => {
+    const project = createProject(db, { type: 'chat', name: 'P' })
+    const thread = createThread(db, { project_id: project.id })
+    expect(() => updateThread(db, thread.id, { color: 'red', tags: ['あ'.repeat(21)] })).toThrow(
+      ValidationError
+    )
+    expect(() =>
+      updateThread(db, thread.id, { tags: Array.from({ length: 11 }, (_, i) => `t${i}`) })
+    ).toThrow('10 個まで')
+    expect(getThread(db, thread.id)).toMatchObject({ color: null, tags: [] })
+  })
+
+  it('回答だけにブックマークを付けられ、新しく付けた順に一覧できる', () => {
+    const chat = createProject(db, { type: 'chat', name: 'チャット' })
+    const other = createProject(db, { type: 'chat', name: '別' })
+    const t1 = createThread(db, { project_id: chat.id, title: 'T1' })
+    const t2 = createThread(db, { project_id: other.id })
+    const user = createMessage(db, { thread_id: t1.id, role: 'user', content: '質問' })
+    const a1 = createMessage(db, {
+      thread_id: t1.id,
+      role: 'assistant',
+      content: `回答\n\n${'長い'.repeat(100)}`
+    })
+    const a2 = createMessage(db, { thread_id: t2.id, role: 'assistant', content: '別の回答' })
+
+    expect(setBookmark(db, user.id, true)).toBe(false)
+    expect(setBookmark(db, 'missing', true)).toBe(false)
+    expect(setBookmark(db, a1.id, true)).toBe(true)
+    vi.advanceTimersByTime(1000)
+    expect(setBookmark(db, a2.id, true)).toBe(true)
+
+    const list = listBookmarks(db)
+    expect(list.map((b) => b.message_id)).toEqual([a2.id, a1.id])
+    expect(list[1]).toMatchObject({
+      thread_title: 'T1',
+      project_name: 'チャット',
+      project_type: 'chat'
+    })
+    // 冒頭は改行をまとめ、長ければ切る
+    expect(list[1].excerpt.startsWith('回答 長い')).toBe(true)
+    expect([...list[1].excerpt]).toHaveLength(121)
+    expect(listBookmarks(db, chat.id).map((b) => b.message_id)).toEqual([a1.id])
+
+    setBookmark(db, a1.id, false)
+    expect(getMessage(db, a1.id)?.bookmarked_at).toBeNull()
+    expect(listBookmarks(db).map((b) => b.message_id)).toEqual([a2.id])
   })
 })

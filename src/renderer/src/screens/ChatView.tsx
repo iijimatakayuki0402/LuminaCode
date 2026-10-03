@@ -30,6 +30,8 @@ interface Live {
   retry: string | null
   /** CHT-11: 検索している語（本文が届いたら消す） */
   searching?: string | null
+  /** CHT-16: 拒否されて別のモデルが回答している */
+  fallback?: { from: string; to: string }
 }
 
 /** 会話の一覧に並べる行（10.1: 仮想スクロールで、画面に見えている行だけを描画する） */
@@ -96,7 +98,7 @@ export function ChatView({
   } | null>(null)
   const [live, setLive] = useState<Record<string, Live>>({})
   const [error, setError] = useState<string | null>(null)
-  const [prefs, setPrefs] = useState<ChatPrefs>({ sendKey: 'enter' })
+  const [prefs, setPrefs] = useState<ChatPrefs>({ sendKey: 'enter', fallback: true })
   const online = useOnline()
   const logRef = useRef<HTMLDivElement>(null)
   // 通知の購読の中から最新の関数を呼べるようにする
@@ -190,14 +192,16 @@ export function ChatView({
               ? { ...current, thinking: current.thinking + event.text, retry: null }
               : event.type === 'webSearch'
                 ? { ...current, searching: event.query || ja.chat.webSearchUnknown }
-                : {
-                    ...current,
-                    retry: ja.chat.retrying(
-                      event.attempt,
-                      event.maxAttempts,
-                      Math.round(event.waitMs / 1000)
-                    )
-                  }
+                : event.type === 'fallback'
+                  ? { ...current, fallback: { from: event.from, to: event.to } }
+                  : {
+                      ...current,
+                      retry: ja.chat.retrying(
+                        event.attempt,
+                        event.maxAttempts,
+                        Math.round(event.waitMs / 1000)
+                      )
+                    }
         return { ...map, [event.messageId]: next }
       })
     })
@@ -344,6 +348,19 @@ export function ChatView({
 
   const fail = (e: unknown): void => setError((e as Error).message)
 
+  // BMK-01: 回答のブックマークを付け外しする
+  const toggleBookmark = async (m: Message): Promise<void> => {
+    const on = m.bookmarked_at === null
+    try {
+      await unwrap(window.lumina.messages.setBookmark(m.id, on))
+      setMessages((list) =>
+        list.map((x) => (x.id === m.id ? { ...x, bookmarked_at: on ? Date.now() : null } : x))
+      )
+    } catch (e) {
+      fail(e)
+    }
+  }
+
   const send = async (content: string, attachments: AttachmentInfo[]): Promise<boolean> => {
     setError(null)
     try {
@@ -469,6 +486,7 @@ export function ChatView({
         tools={cowork ? tools.filter((t) => t.message_id === m.id) : []}
         generating={generating}
         branch={branchNav(m)}
+        onToggleBookmark={() => void toggleBookmark(m)}
       />
     )
   }
@@ -736,7 +754,8 @@ function AssistantRow({
   cowork,
   tools,
   generating,
-  branch
+  branch,
+  onToggleBookmark
 }: {
   message: Message
   first: boolean
@@ -746,6 +765,7 @@ function AssistantRow({
   tools: ToolEventInfo[]
   generating: boolean
   branch: React.ReactNode
+  onToggleBookmark: () => void
 }): React.JSX.Element {
   const streaming = message.status === 'streaming'
   const text = streaming ? (live?.text ?? '') : message.content
@@ -784,6 +804,13 @@ function AssistantRow({
         {streaming && <span className="cursor" aria-hidden="true" />}
       </div>
       {live?.retry && <p className="message message-info">{live.retry}</p>}
+      {/* CHT-16: 拒否されて別のモデルが回答した */}
+      {streaming && live?.fallback && (
+        <p className="hint">{ja.chat.fallingBack(live.fallback.from, live.fallback.to)}</p>
+      )}
+      {!streaming && message.fallback && (
+        <p className="hint">{ja.chat.fallback(message.fallback.from, message.fallback.to)}</p>
+      )}
       {streaming && live?.searching && (
         <p className="hint">{ja.chat.webSearching(live.searching)}</p>
       )}
@@ -808,15 +835,34 @@ function AssistantRow({
           </ul>
         </details>
       )}
-      {message.status === 'stopped' && <p className="hint">{ja.chat.status.stopped}</p>}
+      {message.status === 'stopped' && (
+        <p className="hint">
+          {/* USG-04: 使用量の上限で止めた場合は、そのことを示す */}
+          {message.error_kind === 'budget' ? ja.chat.budgetStopped : ja.chat.status.stopped}
+        </p>
+      )}
       {message.status === 'interrupted' && <p className="hint">{ja.chat.status.interrupted}</p>}
       {message.status === 'error' && <p className="hint">{ja.chat.status.error}</p>}
       {message.stop_reason === 'refusal' && <p className="hint">{ja.chat.refusal}</p>}
-      {message.stop_reason === 'max_tokens' && <p className="hint">{ja.chat.maxTokens}</p>}
+      {message.stop_reason === 'max_tokens' && message.error_kind !== 'budget' && (
+        <p className="hint">{ja.chat.maxTokens}</p>
+      )}
       {/* CHT-13: 回答の下にコピーボタンを常時表示する（生成中は無効） */}
       <div className="log-actions">
         {branch}
         <CopyButton text={message.content} disabled={streaming || message.content === ''} />
+        {/* BMK-01: ブックマーク */}
+        {!streaming && (
+          <button
+            className={`btn btn-sm${message.bookmarked_at !== null ? ' bookmark-on' : ''}`}
+            type="button"
+            aria-pressed={message.bookmarked_at !== null}
+            title={message.bookmarked_at !== null ? ja.chat.bookmarkRemove : ja.chat.bookmarkAdd}
+            onClick={onToggleBookmark}
+          >
+            {message.bookmarked_at !== null ? '★' : '☆'} {ja.chat.bookmark}
+          </button>
+        )}
         {cowork && !streaming && tools.length > 0 && (
           <ChangesPanel messageId={message.id} disabled={generating} />
         )}

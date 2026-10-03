@@ -195,9 +195,9 @@ function ChatPrefsSection(): React.JSX.Element {
     }
   }, [])
 
-  const update = async (sendKey: ChatPrefs['sendKey']): Promise<void> => {
+  const update = async (input: Partial<ChatPrefs>): Promise<void> => {
     try {
-      setPrefs(await unwrap(window.lumina.chatPrefs.set({ sendKey })))
+      setPrefs(await unwrap(window.lumina.chatPrefs.set(input)))
     } catch (error) {
       setMessage({ tone: 'error', text: (error as Error).message })
     }
@@ -213,12 +213,23 @@ function ChatPrefsSection(): React.JSX.Element {
               type="radio"
               name="send-key"
               checked={prefs?.sendKey === key}
-              onChange={() => void update(key)}
+              onChange={() => void update({ sendKey: key })}
             />
             {ja.chat.sendKeys[key]}
           </label>
         ))}
       </div>
+      {/* CHT-16: 回答を拒否されたときのフォールバック（既定はオン） */}
+      <label className="check" style={{ marginTop: '0.75rem' }}>
+        <input
+          type="checkbox"
+          checked={prefs?.fallback ?? true}
+          disabled={prefs === null}
+          onChange={(e) => void update({ fallback: e.target.checked })}
+        />
+        {ja.chat.fallbackSetting}
+      </label>
+      <p className="hint">{ja.chat.fallbackNote}</p>
       <Message message={message} />
     </section>
   )

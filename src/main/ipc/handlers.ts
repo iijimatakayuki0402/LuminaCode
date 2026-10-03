@@ -249,6 +249,13 @@ export function createHandlers({
       ops.getLastOpenedThread(db, v.id(projectId, 'projectId')),
 
     'messages:listByThread': (threadId) => chatService.listMessages(v.id(threadId, 'threadId')),
+    'messages:setBookmark': (messageId, on) =>
+      deleted(
+        ops.setBookmark(db, v.id(messageId, 'messageId'), v.bool(on, 'on')),
+        'メッセージが見つかりません。'
+      ),
+    'bookmarks:list': (projectId) =>
+      ops.listBookmarks(db, v.optional(v.id)(projectId, 'projectId')),
 
     'apiKey:getStatus': () => apiKeyStore.status(),
     'apiKey:save': async (input) => {

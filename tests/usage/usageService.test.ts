@@ -140,6 +140,33 @@ describe('集計（USG-02）', () => {
     expect(usage.projectTotals(projectA).cost).toBe(3)
   })
 
+  it('キャッシュの効果: モデルごとの単価で節約額を求め、ヒット率を出す（USG-07）', () => {
+    const insert = db.prepare(
+      `INSERT INTO usage_records (id, project_id, project_name, model, input_tokens, output_tokens,
+         cache_read_tokens, cache_write_tokens, estimated_cost, created_at)
+       VALUES (?, ?, 'A', ?, ?, 0, ?, ?, 0, ?)`
+    )
+    // claude-sonnet-5-5: 入力 2・読み込み 0.2・書き込み 2.5（USD / 100 万トークン）
+    insert.run('r1', projectA, 'claude-sonnet-5-5', 100_000, 800_000, 100_000, NOW)
+    // 単価が不明なモデルは金額に含めず、トークン数とヒット率には含める
+    insert.run('r2', projectA, 'unknown-model', 0, 100_000, 0, NOW)
+    // 別の月は含めない
+    insert.run('r3', projectA, 'claude-sonnet-5-5', 0, 999_999, 0, new Date(2026, 8, 1).getTime())
+
+    const { cache } = usage.summary()
+    // 0.8M × (2 − 0.2) − 0.1M × (2.5 − 2) = 1.44 − 0.05
+    expect(cache.savedUsd).toBeCloseTo(1.39, 6)
+    expect(cache.readTokens).toBe(900_000)
+    expect(cache.writeTokens).toBe(100_000)
+    expect(cache.hitRate).toBeCloseTo(900_000 / 1_100_000, 6)
+    expect(usage.summary('2026-11').cache).toEqual({
+      savedUsd: 0,
+      hitRate: null,
+      readTokens: 0,
+      writeTokens: 0
+    })
+  })
+
   it('月の範囲', () => {
     expect(monthOf(NOW)).toBe('2026-10')
     const { from, to } = monthRange('2026-12')

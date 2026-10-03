@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useId, useState } from 'react'
 import { resolveModel } from '@shared/models'
-import type {
-  AlwaysAllowRules,
-  EffortLevel,
-  PermissionMode,
-  Project,
-  Thread,
-  UsageStatus,
-  UsageTotals
+import {
+  THREAD_COLORS,
+  type AlwaysAllowRules,
+  type EffortLevel,
+  type PermissionMode,
+  type Project,
+  type Thread,
+  type ThreadColor,
+  type UsageStatus,
+  type UsageTotals
 } from '@shared/types'
-import { ConfirmDialog } from '../components/Dialog'
+import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { Message, type MessageState } from '../components/Message'
 import { TypeBadge } from '../components/TypeBadge'
 import { unwrap } from '../lib/ipc'
@@ -47,6 +49,10 @@ export function ProjectScreen({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   const [deleting, setDeleting] = useState<Thread | null>(null)
+  /** THR-06: 色ラベル・タグを編集中のスレッド。THR-07: 絞り込み */
+  const [labeling, setLabeling] = useState<Thread | null>(null)
+  const [filterColor, setFilterColor] = useState<ThreadColor | ''>('')
+  const [filterTag, setFilterTag] = useState('')
   const [message, setMessage] = useState<MessageState | null>(null)
   const { models, defaultModel } = useModels()
   const modelSelectId = useId()
@@ -219,6 +225,29 @@ export function ProjectScreen({
     }
   }
 
+  const saveLabels = async (
+    thread: Thread,
+    color: ThreadColor | '',
+    tags: string[]
+  ): Promise<void> => {
+    try {
+      await unwrap(window.lumina.threads.update(thread.id, { color, tags }))
+      setLabeling(null)
+      await reload()
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  // THR-07: 色ラベル・タグで絞り込む（使われている色・タグだけを選べる）
+  const usedColors = THREAD_COLORS.filter((c) => (threads ?? []).some((t) => t.color === c))
+  const usedTags = [...new Set((threads ?? []).flatMap((t) => t.tags))].sort((a, b) =>
+    a.localeCompare(b, 'ja')
+  )
+  const shownThreads = (threads ?? []).filter(
+    (t) => (!filterColor || t.color === filterColor) && (!filterTag || t.tags.includes(filterTag))
+  )
+
   const selected = threads?.find((t) => t.id === selectedId) ?? null
   const activeModelInfo = models.find(
     (m) => m.id === resolveModel(defaultModel, project.model, selected?.model ?? null)
@@ -260,8 +289,43 @@ export function ProjectScreen({
           {threads !== null && threads.length === 0 && (
             <p className="hint">{ja.project.noThreads}</p>
           )}
+          {(usedColors.length > 0 || usedTags.length > 0 || filterColor || filterTag) && (
+            <div className="thread-filter" role="group" aria-label={ja.project.filter}>
+              <select
+                className="select"
+                aria-label={ja.project.filterColor}
+                value={filterColor}
+                onChange={(e) => setFilterColor(e.target.value as ThreadColor | '')}
+              >
+                <option value="">{ja.project.allColors}</option>
+                {THREAD_COLORS.filter((c) => usedColors.includes(c) || c === filterColor).map(
+                  (c) => (
+                    <option key={c} value={c}>
+                      {ja.project.colors[c]}
+                    </option>
+                  )
+                )}
+              </select>
+              <select
+                className="select"
+                aria-label={ja.project.filterTag}
+                value={filterTag}
+                onChange={(e) => setFilterTag(e.target.value)}
+              >
+                <option value="">{ja.project.allTags}</option>
+                {[...new Set([...usedTags, ...(filterTag ? [filterTag] : [])])].map((tag) => (
+                  <option key={tag} value={tag}>
+                    {tag}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {threads !== null && threads.length > 0 && shownThreads.length === 0 && (
+            <p className="hint">{ja.project.noMatch}</p>
+          )}
           <ul className="thread-list">
-            {(threads ?? []).map((t) => (
+            {shownThreads.map((t) => (
               <li key={t.id} className={`thread-item${t.id === selectedId ? ' selected' : ''}`}>
                 {renaming?.id === t.id ? (
                   <form
@@ -292,13 +356,41 @@ export function ProjectScreen({
                   </form>
                 ) : (
                   <>
+                    <div className="thread-main">
+                      <button
+                        className="thread-open"
+                        type="button"
+                        aria-current={t.id === selectedId}
+                        onClick={() => setSelectedId(t.id)}
+                      >
+                        {t.color && (
+                          <span
+                            className={`label-dot color-${t.color}`}
+                            role="img"
+                            aria-label={`${ja.project.color}: ${ja.project.colors[t.color]}`}
+                            title={ja.project.colors[t.color]}
+                          />
+                        )}
+                        <span className="thread-title">{threadTitle(t)}</span>
+                      </button>
+                      {t.tags.length > 0 && (
+                        <span className="thread-tags" aria-label={ja.project.tags}>
+                          {t.tags.map((tag) => (
+                            <span key={tag} className="tag-chip">
+                              {tag}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </div>
                     <button
-                      className="thread-open"
+                      className="btn btn-sm"
                       type="button"
-                      aria-current={t.id === selectedId}
-                      onClick={() => setSelectedId(t.id)}
+                      aria-label={ja.project.labelsTitle(threadTitle(t))}
+                      title={ja.project.labels}
+                      onClick={() => setLabeling(t)}
                     >
-                      {threadTitle(t)}
+                      ◆
                     </button>
                     <button
                       className="btn btn-sm"
@@ -484,6 +576,14 @@ export function ProjectScreen({
 
       {trashOpen && <TrashDialog projectId={project.id} onClose={() => setTrashOpen(false)} />}
 
+      {labeling && (
+        <LabelsDialog
+          thread={labeling}
+          onCancel={() => setLabeling(null)}
+          onSave={(color, tags) => void saveLabels(labeling, color, tags)}
+        />
+      )}
+
       {deleting && (
         <ConfirmDialog
           danger
@@ -499,6 +599,84 @@ export function ProjectScreen({
         />
       )}
     </div>
+  )
+}
+
+/**
+ * スレッドの色ラベルとタグの編集（THR-06）
+ */
+function LabelsDialog({
+  thread,
+  onCancel,
+  onSave
+}: {
+  thread: Thread
+  onCancel: () => void
+  onSave: (color: ThreadColor | '', tags: string[]) => void
+}): React.JSX.Element {
+  const [color, setColor] = useState<ThreadColor | ''>(thread.color ?? '')
+  const [tags, setTags] = useState(thread.tags.join(', '))
+  const tagsId = useId()
+  const formId = useId()
+  const save = (): void =>
+    onSave(
+      color,
+      tags
+        .split(/[,、]/)
+        .map((t) => t.trim())
+        .filter((t) => t !== '')
+    )
+  return (
+    <Dialog
+      title={ja.project.labelsTitle(threadTitle(thread))}
+      onClose={onCancel}
+      footer={
+        <>
+          <button className="btn" type="button" onClick={onCancel}>
+            {ja.common.cancel}
+          </button>
+          <button className="btn btn-primary" type="submit" form={formId}>
+            {ja.common.save}
+          </button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        onSubmit={(e) => {
+          e.preventDefault()
+          save()
+        }}
+      >
+        <fieldset className="field">
+          <legend>{ja.project.color}</legend>
+          <div className="color-choices">
+            {(['', ...THREAD_COLORS] as const).map((c) => (
+              <label key={c || 'none'} className="check">
+                <input
+                  type="radio"
+                  name="thread-color"
+                  checked={color === c}
+                  onChange={() => setColor(c)}
+                />
+                {c && <span className={`label-dot color-${c}`} aria-hidden="true" />}
+                {c ? ja.project.colors[c] : ja.project.noColor}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="field">
+          <label htmlFor={tagsId}>{ja.project.tags}</label>
+          <input
+            id={tagsId}
+            className="input"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+          />
+          <span className="hint">{ja.project.tagsNote}</span>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

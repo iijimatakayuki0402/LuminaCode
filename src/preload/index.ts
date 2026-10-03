@@ -55,7 +55,11 @@ const api: LuminaApi = {
     setActiveLeaf: invoke('threads:setActiveLeaf')
   },
   messages: {
-    listByThread: invoke('messages:listByThread')
+    listByThread: invoke('messages:listByThread'),
+    setBookmark: invoke('messages:setBookmark')
+  },
+  bookmarks: {
+    list: invoke('bookmarks:list')
   },
   apiKey: {
     getStatus: invoke('apiKey:getStatus'),

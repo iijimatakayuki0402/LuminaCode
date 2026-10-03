@@ -307,6 +307,19 @@ export const MIGRATIONS: Migration[] = [
     // 思考は常にオンだったため、既存のスレッドはオンにする（新しいスレッドの既定もオン）
     version: 8,
     statements: ['UPDATE threads SET extended_thinking = 1']
+  },
+  {
+    // Phase 4（2026-10-03 追加要望）
+    //   messages.bookmarked_at: ブックマークした日時（BMK-01。null は未設定）
+    //   threads.color:          色ラベル（THR-06。null は無し）
+    //   threads.tags:           タグ（THR-06。文字列の JSON 配列）
+    version: 9,
+    statements: [
+      'ALTER TABLE messages ADD COLUMN bookmarked_at INTEGER',
+      'CREATE INDEX IF NOT EXISTS idx_messages_bookmarked ON messages(bookmarked_at DESC) WHERE bookmarked_at IS NOT NULL',
+      'ALTER TABLE threads ADD COLUMN color TEXT',
+      "ALTER TABLE threads ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'"
+    ]
   }
 ]
 

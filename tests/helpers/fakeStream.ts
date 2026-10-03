@@ -22,6 +22,15 @@ export type StreamBehavior =
         requests?: number
         filtered?: boolean
       }
+      /**
+       * CHT-16: 拒否されて別のモデルが回答した（出力の前に切り替わった形）。
+       * declined は拒否したモデルの試行の使用量
+       */
+      fallback?: {
+        from: string
+        to: string
+        declined: { input_tokens: number; output_tokens: number }
+      }
     }
   | { error: unknown }
   /** 差分を送った後、停止されるまで待つ */
@@ -52,9 +61,25 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
         'usage' in behavior && behavior.usage
           ? behavior.usage
           : { input_tokens: 100, output_tokens: 20 }
+      const fallback = 'fallback' in behavior ? behavior.fallback : undefined
       yield {
         type: 'message_start',
-        message: { usage: { input_tokens: usage.input_tokens, output_tokens: 0 } }
+        message: {
+          ...(fallback ? { model: fallback.to } : {}),
+          usage: { input_tokens: usage.input_tokens, output_tokens: 0 }
+        }
+      }
+      const fallbackBlock = fallback
+        ? {
+            type: 'fallback',
+            from: { model: fallback.from },
+            to: { model: fallback.to },
+            trigger: { type: 'refusal', category: 'cyber' }
+          }
+        : null
+      if (fallbackBlock) {
+        yield { type: 'content_block_start', index: 0, content_block: fallbackBlock }
+        yield { type: 'content_block_stop', index: 0 }
       }
       const thinking = 'thinking' in behavior ? behavior.thinking : undefined
       if (thinking)
@@ -105,7 +130,9 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
       yield { type: 'message_delta', usage: { output_tokens: usage.output_tokens } }
       const text = behavior.chunks.join('')
       final = {
+        ...(fallback ? { model: fallback.to } : {}),
         content: [
+          ...(fallbackBlock ? [fallbackBlock] : []),
           ...(thinking ? [{ type: 'thinking', thinking, signature: 'sig-abc' }] : []),
           ...(search
             ? [
@@ -136,7 +163,29 @@ export function fakeChatClient(behaviors: StreamBehavior[]): FakeChat {
           output_tokens: usage.output_tokens,
           cache_creation_input_tokens: 0,
           cache_read_input_tokens: 0,
-          ...(search ? { server_tool_use: { web_search_requests: search.requests ?? 1 } } : {})
+          ...(search ? { server_tool_use: { web_search_requests: search.requests ?? 1 } } : {}),
+          // フォールバックした場合、上位の usage は回答したモデルの分だけで、試行ごとの記録が付く
+          ...(fallback
+            ? {
+                iterations: [
+                  {
+                    type: 'message',
+                    model: fallback.from,
+                    ...fallback.declined,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0
+                  },
+                  {
+                    type: 'fallback_message',
+                    model: fallback.to,
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0
+                  }
+                ]
+              }
+            : {})
         }
       }
     }

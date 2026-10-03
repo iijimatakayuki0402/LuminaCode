@@ -14,6 +14,7 @@ import { ModelService } from '../../src/main/models/modelService'
 import { apiError } from '../helpers/fakeAnthropic'
 import { offCandidates } from '../../src/main/chat/thinking'
 import { estimateCost } from '../../src/main/chat/pricing'
+import { UsageService } from '../../src/main/usage/usageService'
 
 /** 思考の指定がモデルに受け付けられなかったときの 400 */
 const thinkingError = (): InstanceType<typeof Anthropic.APIError> =>
@@ -232,7 +233,9 @@ describe('送信とストリーミング（CHT-02、CHT-03）', () => {
         display: 'summarized',
         block_binding: { prefix_mismatch_behavior: 'drop_block' }
       },
-      betas: ['thinking-binding-controls-2026-08-01']
+      // CHT-16: 拒否されたときのフォールバック（既定はオン）
+      fallbacks: 'default',
+      betas: ['thinking-binding-controls-2026-08-01', 'server-side-fallback-2026-07-01']
     })
   })
 
@@ -242,7 +245,7 @@ describe('送信とストリーミング（CHT-02、CHT-03）', () => {
     expect(fake.calls[0].model).toBe(LEGACY)
     expect(fake.calls[0].max_tokens).toBe(8192)
     expect(fake.calls[0]).not.toHaveProperty('thinking')
-    expect(fake.calls[0]).not.toHaveProperty('betas')
+    expect(fake.calls[0].betas).toEqual(['server-side-fallback-2026-07-01'])
   })
 })
 
@@ -577,7 +580,8 @@ describe('思考量・共通の指示・要約・タイトル（Phase 2）', () 
     ops.updateThread(db, threadId, { extended_thinking: false })
     await sendAndWait('Q2')
     expect(fake.calls[1].thinking).toEqual({ type: 'disabled' })
-    expect(fake.calls[1]).not.toHaveProperty('betas')
+    // 思考のベータは付けない（フォールバックのベータだけ）
+    expect(fake.calls[1].betas).toEqual(['server-side-fallback-2026-07-01'])
     const assistant = fake.calls[1].messages.find((m) => m.role === 'assistant')!
     expect((assistant.content as { type: string }[]).map((b) => b.type)).toEqual(['text'])
     // 受け付けられた指定を覚える
@@ -795,5 +799,177 @@ describe('Web 検索（CHT-11）', () => {
     await service.whenIdle(other)
     expect(fake.calls[2]).not.toHaveProperty('tools')
     expect(fake.calls[2]).not.toHaveProperty('tool_choice')
+  })
+})
+
+/** fallbacks の指定がモデルに受け付けられなかったときの 400 */
+const fallbackError = (): InstanceType<typeof Anthropic.APIError> =>
+  Anthropic.APIError.generate(
+    400,
+    {
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'fallbacks: not supported for this model' }
+    },
+    'fallbacks: not supported for this model',
+    new Headers()
+  )
+
+/** 設定や使用量を変えた ChatService（同じ DB・フェイクを使う） */
+function makeService(
+  extra: Partial<ConstructorParameters<typeof ChatService>[0]> = {}
+): ChatService {
+  return new ChatService({
+    db,
+    attachments,
+    modelService: new ModelService(db, () => null),
+    getApiKey: () => apiKey,
+    createClient: () => fake.client,
+    emit: (e) => events.push(e),
+    sleep: async () => {},
+    flushIntervalMs: 1,
+    ...extra
+  })
+}
+
+async function sendWith(chat: ChatService, content: string): Promise<Message> {
+  const { assistantMessage } = chat.send({ threadId, content, attachmentIds: [] })
+  await chat.whenIdle(threadId)
+  return chat.listMessages(threadId).find((m) => m.id === assistantMessage.id)!
+}
+
+describe('拒否されたときのフォールバック（CHT-16）', () => {
+  const FALLBACK_MODEL = 'claude-opus-4-8'
+
+  it('別のモデルが回答したことを知らせ、回答したモデルとモデルごとの使用量を記録する', async () => {
+    setup([
+      {
+        chunks: ['答え'],
+        usage: { input_tokens: 100, output_tokens: 50 },
+        fallback: {
+          from: ADAPTIVE,
+          to: FALLBACK_MODEL,
+          declined: { input_tokens: 100, output_tokens: 0 }
+        }
+      },
+      { chunks: ['次'] }
+    ])
+    const m = await sendAndWait('Q1')
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'fallback', from: ADAPTIVE, to: FALLBACK_MODEL })
+    )
+    expect(m).toMatchObject({
+      status: 'complete',
+      content: '答え',
+      model: FALLBACK_MODEL,
+      fallback: { from: ADAPTIVE, to: FALLBACK_MODEL },
+      tokens_used: 250
+    })
+    const records = db
+      .prepare(
+        'SELECT model, input_tokens, output_tokens FROM usage_records WHERE message_id = ? ORDER BY rowid'
+      )
+      .all(m.id)
+    expect(records).toEqual([
+      { model: ADAPTIVE, input_tokens: 100, output_tokens: 0 },
+      { model: FALLBACK_MODEL, input_tokens: 100, output_tokens: 50 }
+    ])
+    // 次のリクエストでは fallback ブロックを送り返さない
+    await sendAndWait('Q2')
+    const assistant = fake.calls[1].messages.find((x) => x.role === 'assistant')!
+    expect((assistant.content as { type: string }[]).map((b) => b.type)).toEqual(['text'])
+  })
+
+  it('受け付けないモデルでは指定せずに送り直し、次からは指定しない', async () => {
+    setup([{ error: fallbackError() }, { chunks: ['a'] }, { chunks: ['b'] }])
+    const m = await sendAndWait('Q1')
+    expect(m.status).toBe('complete')
+    expect(fake.calls[0].fallbacks).toBe('default')
+    expect(fake.calls[1]).not.toHaveProperty('fallbacks')
+    expect(fake.calls[1].betas).toEqual(['thinking-binding-controls-2026-08-01'])
+    expect(ops.getSetting(db, `fallback.unsupported.${ADAPTIVE}`)).toBe('1')
+    await sendAndWait('Q2')
+    expect(fake.calls).toHaveLength(3)
+    expect(fake.calls[2]).not.toHaveProperty('fallbacks')
+  })
+
+  it('設定でオフにすると指定しない', async () => {
+    const chat = makeService({ isFallbackEnabled: () => false })
+    await sendWith(chat, 'Q')
+    expect(fake.calls[0]).not.toHaveProperty('fallbacks')
+    expect(fake.calls[0].betas).toEqual(['thinking-binding-controls-2026-08-01'])
+  })
+})
+
+describe('生成途中の上限（USG-04）', () => {
+  // 単価表にあるモデル（入力 2・出力 10 USD / 100 万トークン）
+  const PRICED = 'claude-sonnet-5-5'
+  let usage: UsageService
+
+  beforeEach(() => {
+    usage = new UsageService(db, join(dir, 'pricing.json'))
+    ops.updateThread(db, threadId, { model: PRICED })
+  })
+
+  it('残りの予算から出力の上限を絞る', async () => {
+    usage.setLimits({ monthlyLimit: 0.05 })
+    await sendWith(makeService({ usage }), 'Q')
+    // 0.05 USD から入力の見込みを引いた額で出せる出力（約 5,000 トークン）
+    expect(fake.calls[0].max_tokens).toBeGreaterThan(4900)
+    expect(fake.calls[0].max_tokens).toBeLessThan(5000)
+  })
+
+  it('警告のみの設定と、上限が無い場合は絞らない', async () => {
+    const chat = makeService({ usage })
+    await sendWith(chat, 'Q1')
+    usage.setLimits({ monthlyLimit: 0.05, action: 'warn' })
+    await sendWith(chat, 'Q2')
+    expect(fake.calls.map((c) => c.max_tokens)).toEqual([64000, 64000])
+  })
+
+  it('残りの予算で十分な出力ができない場合は送らない', async () => {
+    usage.setLimits({ monthlyLimit: 0.005 })
+    const m = await sendWith(makeService({ usage }), 'Q')
+    expect(fake.calls).toHaveLength(0)
+    expect(m).toMatchObject({ status: 'error', error_kind: 'budget' })
+    expect(finished().at(-1)?.errorMessage).toContain('上限')
+  })
+
+  it('生成中に上限を超えたら中断し、途中までの回答を残す', async () => {
+    usage.setLimits({ monthlyLimit: 0.05 })
+    // 3 万文字（少なくとも 7,500 トークン = 0.075 USD）を受け取った時点で上限を超える
+    setup([{ chunks: ['あ'.repeat(30000)], hang: true }])
+    const m = await sendWith(makeService({ usage }), 'Q')
+    expect(m).toMatchObject({ status: 'stopped', error_kind: 'budget' })
+    expect(m.content).toHaveLength(30000)
+    // 受け取った分の出力も使用量に数える
+    const record = db
+      .prepare('SELECT output_tokens FROM usage_records WHERE message_id = ?')
+      .get(m.id) as { output_tokens: number }
+    expect(record.output_tokens).toBeGreaterThanOrEqual(7500)
+    expect(usage.status(projectId).level).toBe('exceeded')
+  })
+
+  it('絞った出力の上限で止まった回答は、上限による中断として扱う', async () => {
+    usage.setLimits({ monthlyLimit: 0.05 })
+    setup([{ chunks: ['途中まで'], stopReason: 'max_tokens' }])
+    const m = await sendWith(makeService({ usage }), 'Q')
+    expect(m).toMatchObject({
+      status: 'stopped',
+      error_kind: 'budget',
+      stop_reason: 'max_tokens',
+      content: '途中まで'
+    })
+  })
+
+  it('停止ボタンによる停止は、上限による中断と区別する', async () => {
+    usage.setLimits({ monthlyLimit: 10 })
+    setup([{ chunks: ['少し'], hang: true }])
+    const chat = makeService({ usage })
+    const { assistantMessage } = chat.send({ threadId, content: 'Q', attachmentIds: [] })
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'text')).toBe(true))
+    chat.stop(threadId)
+    await chat.whenIdle(threadId)
+    const m = chat.listMessages(threadId).find((x) => x.id === assistantMessage.id)!
+    expect(m).toMatchObject({ status: 'stopped', error_kind: null })
   })
 })
